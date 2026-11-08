@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bdh-app-sonos-control"
+version = "1.0.0"
+description = "Black Diamond Hub app: Sonos speaker control with Spotify integration"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "bdh-sdk>=0.2,<1",
+    "soco,spotipy,qrcode,channels,social-auth-app-django",
+]
+
+[project.urls]
+Source = "https://github.com/blackdiamondlodge/bdh-app-sonos-control"
+
+[project.entry-points."blackdiamondhub.plugins"]
+sonos_control = "sonos_control.plugin:spec"
+
+[tool.setuptools.packages.find]
+include = ["sonos_control", "sonos_control.*"]
+
+[tool.setuptools.package-data]
+sonos_control = [
+    "templates/**/*",
+    "static/**/*",
+    "migrations/*.py",
+]

@@ -11,7 +11,7 @@ license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "bdh-sdk>=0.2,<1",
-    "soco,spotipy,qrcode,channels,social-auth-app-django",
+    "soco", "spotipy", "qrcode", "channels", "social-auth-app-django",
 ]
 
 [project.urls]

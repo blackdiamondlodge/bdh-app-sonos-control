@@ -1,604 +1,636 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Sonos Control{% endblock %}
+{% block title %}Music{% endblock %}
 
 {% block content %}
 <style>
-    /* ── Page layout ── */
-    .sonos-page {
-        background-color: #000;
+    body {
+        background: radial-gradient(ellipse 120% 80% at 50% 0%, #1d3350 0%, #0c1622 55%, #060a10 100%) fixed !important;
+        color: #fff;
+        margin: 0;
+        overflow: hidden;
     }
 
-    .sonos-content,
-    .spotify-content {
+    #music * { box-sizing: border-box; }
+
+    #music .glass {
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, .1);
+        background: linear-gradient(160deg, rgba(255, 255, 255, .11), rgba(255, 255, 255, .03));
+        box-shadow: 0 14px 36px rgba(0, 0, 0, .28);
+    }
+
+    #music {
         height: calc(100vh - 62px);
-        overflow-y: auto;
-        padding-bottom: 20px;
-        -webkit-overflow-scrolling: touch;
+        padding: 18px 26px 22px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        gap: 18px;
+        max-width: 1920px;
+        margin: 0 auto;
+        user-select: none;
+        -webkit-user-select: none;
     }
 
-    /* ── Speaker layout ── */
-    .sonos-tabs-col {
-        width: 160px;
+    #music.collapsed { grid-template-columns: 96px minmax(0, 1fr); }
+
+    .k {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .18em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .55);
     }
 
-    .sonos-content-col {
-        min-width: 0;  /* allow flex child to shrink below content size */
-    }
-
-    /* ── Speaker tabs ── */
-    #speaker-tabs {
-        background-color: #333;
-        border-radius: 10px;
-        padding: 8px;
-    }
-
-    #speaker-tabs .nav-link {
-        color: #ccc;
-        text-align: center;
-        padding: 8px 10px;
-        margin-bottom: 4px;
-        border-radius: 8px;
-        border: none;
-        font-size: 0.82rem;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    #speaker-tabs .nav-link:hover {
-        color: #fff;
-        background-color: #444;
-    }
-
-    #speaker-tabs .nav-link.active {
-        color: #fff;
-        background-color: #007bff;
-        border: none;
-    }
-
-    .tab-content {
-        padding: 20px;
-        border-radius: 10px;
-        background-color: #fff;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        position: relative;
-    }
-
-    /* ── Album art & play/pause ── */
-    .album-art-container {
-        width: 100%;
-        height: 300px;
-        overflow: hidden;
-    }
-
-    .album-art {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        border-radius: 10px;
-    }
-
-    .play-pause-btn {
-        width: 120px;
-        height: 120px;
-        border-radius: 50%;
-        background-color: rgba(0, 0, 0, 0.5);
-        color: white;
-        font-size: 4rem;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-    }
-
-    /* ── Volume controls ── */
-    .volume-btn {
-        background-color: transparent;
-        border: none;
-        color: #007bff;
-        font-size: 24px;
-        cursor: pointer;
-        flex-shrink: 0;
-    }
-
-    .volume-slider {
-        -webkit-appearance: none;
-        appearance: none;
-        height: 25px;
-        background: #ddd;
-        border-radius: 10px;
-        outline: none;
-        opacity: 0.7;
-        transition: opacity 0.15s ease-in-out;
-    }
-
-    .volume-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 35px;
-        height: 35px;
-        border-radius: 50%;
-        background: #007bff;
-        cursor: pointer;
-    }
-
-    .volume-slider::-moz-range-thumb {
-        width: 35px;
-        height: 35px;
-        border-radius: 50%;
-        background: #007bff;
-        cursor: pointer;
-    }
-
-    .output {
-        margin-left: 15px;
-        font-size: 1.4rem;
-    }
-
-    /* ── Group button ── */
-    .group-btn:disabled {
-        background-color: #aaa;
-        cursor: not-allowed;
-    }
-
-    /* ── Modal ── */
-    .blur-background {
-        filter: blur(5px);
-        transition: filter 0.3s ease;
-    }
-
-    .tab-content .modal-dialog {
-        border-radius: 25px;
-        top: 100px;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        margin: auto;
-        z-index: 1050;
-    }
-
-    /* ── Queue ── */
-    .queue-list {
-        max-height: 25vh;
-        overflow-y: auto;
-        margin-top: 20px;
-        border-radius: 10px;
-        padding-left: 0;
-        margin-left: 0;
-    }
-
-    .queue-list::-webkit-scrollbar {
-        width: 12px;
-    }
-
-    .queue-list::-webkit-scrollbar-thumb {
-        background-color: rgba(0, 0, 0, 0.3);
-        border-radius: 10px;
-    }
-
-    .queue-list::-webkit-scrollbar-track {
-        background-color: rgba(0, 0, 0, 0.1);
-    }
-
-    .queue-list .list-group-item {
-        padding-left: 0;
-        cursor: pointer;
-    }
-
-    .queue-album-art {
-        width: 60px;
-        height: 60px;
-        border-radius: 5px;
-        object-fit: cover;
-    }
-
-    /* ── Audio visualizer ── */
-    .audio-visualizer {
-        display: flex;
-        flex-direction: row;
-        align-items: flex-end;
-        justify-content: space-between;
-        width: 50px;
-        height: 30px;
-        padding: 2px;
-        box-sizing: border-box;
-    }
-
-    .audio-visualizer.hidden {
-        display: none;
-    }
-
-    .audio-visualizer .bar {
+    .round-btn {
+        width: 34px;
+        height: 34px;
         flex: none;
-        flex-shrink: 0;
-        width: 6px;
-        height: 10px;
-        background: #dc3545;
-        animation: bounce 1s infinite ease-in-out alternate;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, .08);
+        border: 1px solid rgba(255, 255, 255, .14);
+        color: #fff;
+        font-size: 13px;
+        cursor: pointer;
     }
 
-    .audio-visualizer .bar:nth-child(2) { animation-delay: 0.2s; }
-    .audio-visualizer .bar:nth-child(3) { animation-delay: 0.4s; }
-    .audio-visualizer .bar:nth-child(4) { animation-delay: 0.6s; }
-    .audio-visualizer .bar:nth-child(5) { animation-delay: 0.8s; }
+    .round-btn.on { background: rgba(60, 200, 180, .2); border-color: #3cc8b4; color: #7fe6d6; }
 
-    @keyframes bounce {
-        0%   { transform: scaleY(1); }
-        50%  { transform: scaleY(2); }
-        100% { transform: scaleY(1); }
+    /* ---- Lodge diagram ---- */
+    .plan { position: relative; padding: 22px 26px; display: flex; flex-direction: column; min-height: 0; }
+    .plan .top { display: flex; align-items: center; gap: 10px; }
+    .plan .hint { margin-left: auto; font-size: 13px; color: rgba(255, 255, 255, .55); text-align: right; }
+    .stage { position: relative; flex: 1; margin-top: 10px; min-height: 0; }
+    .house { position: absolute; left: 8%; top: 12%; width: 50%; height: 80%; pointer-events: none; }
+    .roof {
+        position: absolute; left: -6%; right: -6%; top: -16%; height: 18%;
+        clip-path: polygon(50% 0, 100% 100%, 0 100%);
+        background: rgba(255, 255, 255, .06);
+    }
+    .floor {
+        position: absolute; left: 0; right: 0;
+        border: 1px solid rgba(255, 255, 255, .14);
+        background: rgba(255, 255, 255, .03);
+        border-radius: 6px;
+    }
+    .floor .fl {
+        position: absolute; left: 12px; top: 8px;
+        font-size: 10px; font-weight: 700; letter-spacing: .16em;
+        color: rgba(255, 255, 255, .35); text-transform: uppercase;
+    }
+    .f1 { top: 2%; height: 30%; }
+    .f2 { top: 35%; height: 30%; }
+    .f3 { top: 68%; height: 30%; }
+    .deck { position: absolute; border-top: 3px solid rgba(255, 255, 255, .25); }
+    .outside-label {
+        position: absolute; right: 0; top: 4%;
+        font-size: 11px; font-weight: 700; letter-spacing: .16em; color: rgba(255, 255, 255, .35);
+    }
+
+    .rm {
+        position: absolute;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        padding: 6px;
+        border-radius: 16px;
+        border: 1.5px solid rgba(255, 255, 255, .18);
+        background: rgba(255, 255, 255, .05);
+        font-weight: 700; font-size: 15px; line-height: 1.15; text-align: center;
+        cursor: pointer;
+        transition: border-color .25s, background .25s, box-shadow .25s, transform .1s;
+    }
+    .rm:active { transform: scale(.97); }
+    .rm i.ic { font-size: 22px; color: rgba(255, 255, 255, .55); }
+    .rm small {
+        font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, .5);
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .rm.grp {
+        border-color: var(--c);
+        background: color-mix(in srgb, var(--c) 14%, transparent);
+        box-shadow: 0 0 26px color-mix(in srgb, var(--c) 30%, transparent);
+    }
+    .rm.grp i.ic { color: var(--c); }
+    .rm.grp small { color: color-mix(in srgb, var(--c) 60%, #fff); }
+    .rm.offline { opacity: .4; }
+    .rm.busy { animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .55; } }
+    .rm .badge {
+        position: absolute; top: -10px; right: -10px;
+        width: 26px; height: 26px; border-radius: 50%;
+        display: grid; place-items: center;
+        font-size: 12px; color: #0c1622;
+        background: rgba(255, 255, 255, .85);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+    }
+    .rm.grp .badge { background: var(--c); }
+
+    /* Collapsed strip */
+    .strip { display: none; }
+    #music.collapsed .plan { padding: 16px 0; align-items: center; cursor: pointer; }
+    #music.collapsed .plan > .top, #music.collapsed .stage { display: none; }
+    #music.collapsed .strip { display: flex; flex-direction: column; align-items: center; gap: 18px; height: 100%; }
+    .strip .vt {
+        writing-mode: vertical-rl; transform: rotate(180deg);
+        font-size: 11px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
+        color: rgba(255, 255, 255, .55);
+    }
+    .strip .dots { display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+    .strip .dot {
+        width: 12px; height: 12px; border-radius: 50%;
+        background: rgba(255, 255, 255, .18);
+    }
+    .strip .dot.grp { background: var(--c); box-shadow: 0 0 10px var(--c); }
+
+    /* ---- Right column ---- */
+    .side { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+    .presets { display: flex; gap: 8px; flex-wrap: wrap; flex: none; }
+    .pill {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 9px 16px; border-radius: 999px;
+        background: rgba(255, 255, 255, .06);
+        border: 1px solid rgba(255, 255, 255, .12);
+        font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, .85);
+        cursor: pointer;
+    }
+    .pill i { color: #5ec8ff; }
+    .pill.sp { margin-left: auto; }
+    .pill.danger i { color: #ff8f9a; }
+    .pill:active { background: rgba(255, 255, 255, .14); }
+
+    .cards { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; padding: 2px; }
+    #music.collapsed .cards { display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+
+    .g {
+        padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+        cursor: pointer; transition: box-shadow .25s, border-color .25s;
+    }
+    #music .g.sel {
+        border-color: color-mix(in srgb, var(--c) 70%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 50%, transparent),
+                    0 0 30px color-mix(in srgb, var(--c) 16%, transparent),
+                    0 14px 36px rgba(0, 0, 0, .28);
+    }
+    .gname { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--c); letter-spacing: .04em; }
+    .gname .chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .gname .chips span {
+        font-size: 12px; color: #fff; padding: 3px 9px; border-radius: 999px;
+        background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .12);
+    }
+    .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; }
+    .eq i { width: 3px; background: var(--c); border-radius: 1px; height: 4px; }
+    .eq.on i { animation: eq 1s ease-in-out infinite; }
+    .eq.on i:nth-child(2) { animation-delay: -.4s; }
+    .eq.on i:nth-child(3) { animation-delay: -.7s; }
+    @keyframes eq { 0%, 100% { height: 4px; } 50% { height: 12px; } }
+
+    .np { display: flex; gap: 14px; align-items: center; }
+    .art {
+        position: relative;
+        width: 78px; height: 78px; flex: none; border-radius: 12px; overflow: hidden;
+        display: grid; place-items: center; font-size: 22px; color: rgba(255, 255, 255, .85);
+        background: linear-gradient(135deg, var(--c), #1d3350 80%);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
+    }
+    .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .np .meta { flex: 1; min-width: 0; }
+    .np .t { font-size: 18px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .np .a { font-size: 13px; color: rgba(255, 255, 255, .7); margin: 2px 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .src { font-size: 12px; color: rgba(255, 255, 255, .55); display: flex; align-items: center; gap: 6px; }
+    .src .fa-spotify { color: #1ed760; }
+    .src .fa-apple { color: #ddd; }
+    .tx { display: flex; gap: 10px; align-items: center; }
+    .tx button {
+        width: 34px; height: 34px; border-radius: 50%; border: 0;
+        display: grid; place-items: center;
+        background: rgba(255, 255, 255, .07); color: #fff; font-size: 13px; cursor: pointer;
+    }
+    .tx button.pp { width: 42px; height: 42px; background: #fff; color: #0c1622; font-size: 16px; }
+    .tx button:disabled { opacity: .35; cursor: default; }
+
+    .vol { display: flex; align-items: center; gap: 12px; font-size: 13px; color: rgba(255, 255, 255, .6); }
+    .vol .num { width: 28px; text-align: right; }
+
+    input[type=range].sl {
+        -webkit-appearance: none; appearance: none;
+        flex: 1; height: 6px; border-radius: 3px; margin: 10px 0;
+        background: linear-gradient(var(--c), var(--c)) 0 / var(--p, 0%) 100% no-repeat, rgba(255, 255, 255, .12);
+        outline: none; cursor: pointer;
+    }
+    input[type=range].sl::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+        background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+    }
+    input[type=range].sl::-moz-range-thumb {
+        width: 20px; height: 20px; border: 0; border-radius: 50%;
+        background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+    }
+    .rooms { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 8px; }
+    .room { display: grid; grid-template-columns: 20px minmax(0, 150px) 1fr 30px 34px; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+    .room .ic { color: var(--c); }
+    .room .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .room input[type=range].sl { height: 4px; width: 100%; min-width: 0; }
+    .room .pct { font-size: 12px; color: rgba(255, 255, 255, .5); text-align: right; }
+    .room .mute { background: none; border: 0; color: rgba(255, 255, 255, .5); font-size: 14px; cursor: pointer; }
+    .room .mute.on { color: #ff8f9a; }
+
+    .empty { padding: 26px; text-align: center; color: rgba(255, 255, 255, .6); font-size: 15px; }
+    .empty i { display: block; font-size: 30px; color: #5ec8ff; margin-bottom: 10px; }
+
+    .phone { padding: 14px 18px; display: flex; gap: 14px; align-items: center; font-size: 14px; color: rgba(255, 255, 255, .75); flex: none; margin-top: auto; }
+    .phone > i { font-size: 26px; color: #5ec8ff; }
+
+    .toast {
+        position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
+        padding: 10px 18px; border-radius: 999px; background: rgba(255, 93, 108, .92);
+        font-size: 14px; font-weight: 600; opacity: 0; transition: .25s; pointer-events: none; z-index: 50;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%); }
+
+    @media (max-width: 900px) {
+        body { overflow: auto; }
+        #music, #music.collapsed { display: flex; flex-direction: column; height: auto; padding: 12px; }
+        .plan { height: 440px; flex: none; }
+        #music.collapsed .plan { height: 56px; padding: 0 16px; flex-direction: row; }
+        #music.collapsed .strip { flex-direction: row; height: 100%; width: 100%; }
+        #music.collapsed .strip .vt { writing-mode: horizontal-tb; transform: none; }
+        #music.collapsed .strip .dots { flex-direction: row; margin: 0 0 0 auto; }
+        #music.collapsed .cards { grid-template-columns: 1fr; }
+        .plan .hint { display: none; }
+        .plan { height: 360px; padding: 16px; }
+        .floor .fl, .outside-label { display: none; }
+        .rm { font-size: 11px; gap: 2px; padding: 2px; border-radius: 12px; }
+        .rm small { display: none; }
+        .rm i.ic { font-size: 16px; }
+        .rm .badge { width: 20px; height: 20px; top: -7px; right: -7px; font-size: 10px; }
+        .pill { padding: 8px 12px; font-size: 13px; }
+        .pill.sp { margin-left: 0; }
+        .gname { flex-wrap: wrap; }
+        .gname .chips { margin-left: 0; width: 100%; justify-content: flex-start; }
+        .np { flex-wrap: wrap; }
+        .np .art { width: 64px; height: 64px; }
+        .np .meta { flex-basis: calc(100% - 80px); }
+        .tx { width: 100%; justify-content: center; }
+        .room { grid-template-columns: 20px 92px minmax(0, 1fr) 28px 30px; gap: 8px; }
+        .cards { overflow: visible; }
     }
 </style>
 
-<div class="container-fluid sonos-page">
-    <div class="row">
-        <div class="col-md-4 sonos-content">
-            {% include "sonos_control/partials/sonos_speakers.html" %}
+<div id="music">
+    <div class="glass plan" id="plan">
+        <div class="top">
+            <span class="k">The lodge</span>
+            <span class="hint" id="hint">Tap a room to add it to the selected group &middot; tap again to remove</span>
+            <button class="round-btn" id="collapse" title="Hide the lodge"><i class="fas fa-chevron-left"></i></button>
         </div>
-        <div class="col-md-8 spotify-content">
-            {% include "sonos_control/partials/spotify.html" %}
+        <div class="stage" id="stage">
+            <div class="house">
+                <div class="roof"></div>
+                <div class="floor f1"><span class="fl">Upper</span></div>
+                <div class="floor f2"><span class="fl">Main</span></div>
+                <div class="floor f3"><span class="fl">Lower</span></div>
+            </div>
+            <div class="outside-label">OUTSIDE <i class="fas fa-snowflake" style="margin-left:4px"></i></div>
+            <div id="room-layer"></div>
+        </div>
+        <div class="strip" id="strip" title="Show the lodge">
+            <span class="round-btn"><i class="fas fa-chevron-right"></i></span>
+            <i class="fas fa-house" style="color:rgba(255,255,255,.55)"></i>
+            <span class="vt">Show the lodge</span>
+            <div class="dots" id="dots"></div>
+        </div>
+    </div>
+
+    <div class="side">
+        <div class="presets" id="presets"></div>
+        <div class="cards" id="cards"></div>
+        <div class="glass phone">
+            <i class="fas fa-mobile-screen-button"></i>
+            <div><b style="color:#fff">Play your own music</b><br>
+                In Spotify, Apple Music or YouTube Music tap <i class="fas fa-tv" style="font-size:12px;color:#fff"></i>
+                and pick any room, then group rooms here.</div>
         </div>
     </div>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
-const modalInstances = {};
-const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-let socket = null;
-let activeSpeaker = null;
+(function () {
+    const STATE_URL = "{% url 'sonos_state' %}";
+    const ACTION_URL = "{% url 'sonos_action' %}";
+    const CSRF = "{{ csrf_token }}";
+    const COLORS = ['#3cc8b4', '#ffc35c', '#5ec8ff', '#ff7eb6', '#b28dff', '#8be36b'];
+    const COLLAPSE_KEY = 'bdh.sonos.lodgeCollapsed';
+    const POLL_MS = 2000;
 
-document.addEventListener("DOMContentLoaded", function () {
-    initWebSocket();
-});
+    const root = document.getElementById('music');
+    const els = {
+        layer: document.getElementById('room-layer'), dots: document.getElementById('dots'),
+        presets: document.getElementById('presets'), cards: document.getElementById('cards'),
+        toast: document.getElementById('toast'),
+    };
 
-/* ── WebSocket ── */
-function initWebSocket() {
-    if (!socket || socket.readyState === WebSocket.CLOSED) {
-        socket = new WebSocket(wsScheme + '://' + window.location.host + '/ws/sonos_updates/');
+    let state = null;
+    let selected = null;              // group id (coordinator uid)
+    const expanded = new Set();       // group ids with per-room sliders open
+    const busyRooms = new Set();
+    let dragging = 0;
+    let inflight = 0;
 
-        socket.onopen  = () => console.log('WebSocket connection opened');
-        socket.onclose = () => console.log('WebSocket connection closed');
-        socket.onerror = (e) => console.error('WebSocket Error:', e);
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-        socket.onmessage = function (event) {
-            const data = JSON.parse(event.data);
+    // ------------------------------------------------------------ collapse
+    function setCollapsed(on) {
+        root.classList.toggle('collapsed', on);
+        try { localStorage.setItem(COLLAPSE_KEY, on ? '1' : '0'); } catch (e) { /* private mode */ }
+    }
+    let startCollapsed = false;
+    try { startCollapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch (e) { /* private mode */ }
+    setCollapsed(startCollapsed);
+    document.getElementById('collapse').addEventListener('click', e => { e.stopPropagation(); setCollapsed(true); });
+    document.getElementById('plan').addEventListener('click', () => {
+        if (root.classList.contains('collapsed')) setCollapsed(false);
+    });
 
-            if (data.type === 'response') {
-                if (data.action === 'volume') {
-                    console.log('Volume update response:', data);
-                } else if (data.action === 'play' || data.action === 'pause') {
-                    handlePlayPauseResponse(event);
-                } else if (data.action === 'play_track') {
-                    console.log('Play track response:', data);
-                } else if (data.action === 'clear_queue') {
-                    console.log('Clear queue response:', data);
-                } else {
-                    console.warn('Unhandled WebSocket response:', data);
-                }
-            } else if (data.type === 'speaker_update') {
-                updateSpeakerData(data.speaker_data);
-            } else {
-                console.warn('Unhandled WebSocket message:', data);
-            }
+    // ------------------------------------------------------------ model helpers
+    const isActive = g => g.state === 'PLAYING' || g.state === 'TRANSITIONING' ||
+        (g.state === 'PAUSED_PLAYBACK' && !!(g.title || g.source));
+    const roomById = id => state.rooms.find(r => r.uid === id);
+    const groupById = id => state && state.groups.find(g => g.id === id);
+    const groupOfRoom = uid => state.groups.find(g => g.members.includes(uid));
+
+    function visibleGroups() {
+        return state.groups.filter(g => g.members.length > 1 || isActive(g) || g.id === selected);
+    }
+
+    function colorMap() {
+        const m = {};
+        visibleGroups().forEach((g, i) => { m[g.id] = COLORS[i % COLORS.length]; });
+        return m;
+    }
+
+    let selRooms = [];
+    function fixSelection() {
+        if (!selected || !groupById(selected)) {
+            // The coordinator changed; follow the group via one of its rooms.
+            const next = selRooms.length && state.groups.find(g => g.members.some(u => selRooms.includes(u)));
+            selected = next ? next.id : null;
+        }
+        const cur = groupById(selected);
+        if (cur) { selRooms = cur.members.slice(); return; }
+        const vis = visibleGroups();
+        const playing = vis.find(g => g.state === 'PLAYING');
+        selected = (playing || vis[0] || {}).id || null;
+    }
+
+    // ------------------------------------------------------------ diagram
+    const FLOORS = { upper: 13.6, main: 40, lower: 66.4 };
+    const ROOM_H = 18, FLOOR_H = 24;
+
+    function layoutRooms() {
+        const pos = {};
+        const by = {};
+        state.rooms.forEach(r => (by[r.floor] = by[r.floor] || []).push(r));
+        const place = (list, x0, width, top, maxW) => {
+            if (!list || !list.length) return;
+            const gap = 2;
+            const w = Math.min(maxW, (width - gap * (list.length - 1)) / list.length);
+            const total = w * list.length + gap * (list.length - 1);
+            list.forEach((r, i) => {
+                pos[r.uid] = { left: x0 + (width - total) / 2 + i * (w + gap), top: top + (FLOOR_H - ROOM_H) / 2 + 1, w, h: ROOM_H };
+            });
         };
+        ['upper', 'main', 'lower'].forEach(f => place(by[f], 12, 42, FLOORS[f], 20));
+        place(by.outside_main, 62, 34, FLOORS.main, 20);
+        place((by.outside_lower || []).concat(by.other || []), 62, 34, FLOORS.lower, 16);
+        return pos;
     }
-}
 
-/* ── Play / Pause ── */
-function togglePlayPause(speakerUid, currentState) {
-    const action = (currentState === 'PLAYING') ? 'pause' : 'play';
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-        console.error('WebSocket connection is not open');
-        return;
+    function roomStatus(r, g) {
+        if (!r.online) return 'Offline';
+        if (busyRooms.has(r.uid)) return 'Updating\u2026';
+        if (!g || !isActive(g)) return 'Not playing';
+        if (g.state === 'PAUSED_PLAYBACK') return 'Paused';
+        return g.title || (g.source && g.source.name) || 'Playing';
     }
-    socket.send(JSON.stringify({ speaker_uid: speakerUid, action: action }));
-}
 
-function handlePlayPauseResponse(response) {
-    const data = JSON.parse(response.data);
-    if (data.status === 'success') {
-        const button = document.getElementById(`play-pause-button-${data.speaker_uid}`);
-        const iconSpan = button.querySelector('.icon');
-        if (data.action === 'play') {
-            iconSpan.innerHTML = '&#10074;&#10074;';
-            button.setAttribute('onclick', `togglePlayPause('${data.speaker_uid}', 'PLAYING')`);
+    function renderDiagram(colors) {
+        const pos = layoutRooms();
+        const sel = groupById(selected);
+        let html = '';
+        if (state.rooms.some(r => r.floor === 'outside_main')) html += '<div class="deck" style="left:58%;top:62%;width:38%"></div>';
+        if (state.rooms.some(r => r.floor === 'outside_lower' || r.floor === 'other')) html += '<div class="deck" style="left:58%;top:89%;width:38%"></div>';
+        state.rooms.forEach(r => {
+            const p = pos[r.uid];
+            const g = groupOfRoom(r.uid);
+            const c = g && colors[g.id];
+            const inSel = sel && sel.members.includes(r.uid);
+            let badge = 'fa-plus';
+            if (inSel) badge = 'fa-check';
+            else if (g && c && isActive(g)) badge = 'fa-music';
+            const cls = ['rm', c ? 'grp' : '', r.online ? '' : 'offline', busyRooms.has(r.uid) ? 'busy' : ''].join(' ');
+            html += `<div class="${cls}" data-room="${esc(r.uid)}" style="left:${p.left}%;top:${p.top}%;width:${p.w}%;height:${p.h}%;${c ? '--c:' + c : ''}">` +
+                `<span class="badge"><i class="fas ${badge}"></i></span>` +
+                `<i class="fas ${esc(r.icon)} ic"></i>${esc(r.label)}<small>${esc(roomStatus(r, g))}</small></div>`;
+        });
+        els.layer.innerHTML = html;
+        els.dots.innerHTML = state.rooms.map(r => {
+            const g = groupOfRoom(r.uid); const c = g && colors[g.id];
+            return `<span class="dot ${c ? 'grp' : ''}" title="${esc(r.label)}" style="${c ? '--c:' + c : ''}"></span>`;
+        }).join('');
+        document.getElementById('hint').textContent = sel
+            ? 'Tap a room to add it to the selected group \u00b7 tap again to remove'
+            : 'Tap a room to select it';
+    }
+
+    // ------------------------------------------------------------ cards
+    function slider(kind, id, value) {
+        return `<input type="range" class="sl" min="0" max="100" value="${value}" style="--p:${value}%" ` +
+            `data-kind="${kind}" data-id="${esc(id)}">`;
+    }
+
+    function renderCards(colors) {
+        if (!state.rooms.length) {
+            els.cards.innerHTML = '<div class="glass empty"><i class="fas fa-satellite-dish"></i>Looking for the speakers\u2026</div>';
+            return;
+        }
+        const vis = visibleGroups();
+        if (!vis.length) {
+            els.cards.innerHTML = '<div class="glass empty"><i class="fas fa-hand-pointer"></i>Nothing is playing. Tap a room on the lodge to start a group, or play from your phone.</div>';
+            return;
+        }
+        els.cards.innerHTML = vis.map((g, i) => {
+            const c = colors[g.id];
+            const playing = g.state === 'PLAYING' || g.state === 'TRANSITIONING';
+            const active = isActive(g);
+            const chips = g.members.map(u => `<span>${esc(roomById(u).label)}</span>`).join('');
+            const art = (active && g.art)
+                ? `<i class="fas fa-music"></i><img src="${esc(g.art)}" alt="" onerror="this.remove()">`
+                : `<i class="fas ${active ? 'fa-music' : 'fa-volume-xmark'}"></i>`;
+            const src = g.source
+                ? `<div class="src"><i class="${g.source.brand ? 'fab' : 'fas'} ${esc(g.source.icon)}"></i> ${esc(g.source.name)}</div>`
+                : '<div class="src">Play from your phone to start</div>';
+            const title = active ? (g.title || (g.source && g.source.name) || 'Playing') : 'Not playing';
+            const multi = g.members.length > 1;
+            const open = expanded.has(g.id) && multi;
+            const rooms = open ? '<div class="rooms">' + g.members.map(u => {
+                const r = roomById(u);
+                return `<div class="room"><i class="fas ${esc(r.icon)} ic"></i><span class="lbl">${esc(r.label)}</span>` +
+                    slider('room', u, r.volume) + `<span class="pct">${r.volume}</span>` +
+                    `<button class="mute ${r.muted ? 'on' : ''}" data-mute="${esc(u)}" data-muted="${r.muted ? 1 : 0}" title="Mute">` +
+                    `<i class="fas ${r.muted ? 'fa-volume-xmark' : 'fa-volume-high'}"></i></button></div>`;
+            }).join('') + '</div>' : '';
+            return `<div class="glass g ${g.id === selected ? 'sel' : ''}" data-group="${esc(g.id)}" style="--c:${c}">` +
+                `<div class="gname"><span class="eq ${playing ? 'on' : ''}"><i></i><i></i><i></i></span>` +
+                `GROUP ${i + 1}${g.id === selected ? ' &middot; SELECTED' : ''}<div class="chips">${chips}</div></div>` +
+                `<div class="np"><div class="art">${art}</div><div class="meta"><div class="t">${esc(title)}</div>` +
+                `<div class="a">${esc(active ? g.artist : '')}</div>${src}</div>` +
+                `<div class="tx"><button data-tx="previous" ${active ? '' : 'disabled'}><i class="fas fa-backward-step"></i></button>` +
+                `<button class="pp" data-tx="${playing ? 'pause' : 'play'}" ${active ? '' : 'disabled'}><i class="fas ${playing ? 'fa-pause' : 'fa-play'}"></i></button>` +
+                `<button data-tx="next" ${active ? '' : 'disabled'}><i class="fas fa-forward-step"></i></button></div></div>` +
+                `<div class="vol"><i class="fas fa-volume-low"></i>${slider('group', g.id, g.volume)}` +
+                `<span class="num">${g.volume}</span>` +
+                (multi ? `<button class="round-btn ${open ? 'on' : ''}" data-expand="${esc(g.id)}" title="Room volumes"><i class="fas fa-sliders"></i></button>` : '') +
+                `</div>${rooms}</div>`;
+        }).join('');
+    }
+
+    function renderPresets() {
+        els.presets.innerHTML = state.presets.map(p =>
+            `<button class="pill" data-preset="${esc(p.id)}"><i class="fas ${esc(p.icon)}"></i> ${esc(p.label)}</button>`).join('') +
+            '<button class="pill sp danger" data-all="ungroup_all"><i class="fas fa-unlink"></i> Ungroup all</button>' +
+            '<button class="pill" data-all="pause_all"><i class="fas fa-pause"></i> Pause all</button>';
+    }
+
+    function render() {
+        if (!state) return;
+        fixSelection();
+        const colors = colorMap();
+        renderDiagram(colors);
+        renderCards(colors);
+    }
+
+    function apply(snap) {
+        const presetsChanged = !state || JSON.stringify(state.presets) !== JSON.stringify(snap.presets);
+        state = snap;
+        if (snap.selected) selected = snap.selected;
+        if (presetsChanged) renderPresets();
+        render();
+    }
+
+    // ------------------------------------------------------------ network
+    function toast(msg) {
+        els.toast.textContent = msg;
+        els.toast.classList.add('show');
+        clearTimeout(toast.t);
+        toast.t = setTimeout(() => els.toast.classList.remove('show'), 3000);
+    }
+
+    async function act(body, opts) {
+        opts = opts || {};
+        inflight++;
+        try {
+            const res = await fetch(ACTION_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { toast(data.error || 'Something went wrong'); return; }
+            if (opts.follow) { selected = null; selRooms = opts.follow; }
+            if (!(opts.quiet && dragging)) apply(data);
+        } catch (e) {
+            toast('Could not reach the hub');
+        } finally {
+            inflight--;
+            if (opts.room) { busyRooms.delete(opts.room); render(); }
+        }
+    }
+
+    async function poll() {
+        if (document.hidden || dragging || inflight) return;
+        try {
+            const res = await fetch(STATE_URL, { cache: 'no-store' });
+            if (res.ok && !dragging && !inflight) apply(await res.json());
+        } catch (e) { /* try again next tick */ }
+    }
+
+    // ------------------------------------------------------------ interactions
+    els.layer.addEventListener('click', e => {
+        const el = e.target.closest('[data-room]');
+        if (!el || !state) return;
+        const uid = el.dataset.room;
+        const r = roomById(uid);
+        if (!r || !r.online || busyRooms.has(uid)) return;
+        const sel = groupById(selected);
+        const own = groupOfRoom(uid);
+        if (!sel) { selected = own.id; selRooms = own.members.slice(); render(); return; }
+        if (sel.members.includes(uid)) {
+            if (sel.members.length === 1) { selected = null; selRooms = []; render(); return; }
+            busyRooms.add(uid); render();
+            // If the coordinator leaves, the group gets a new id; keep following its other rooms.
+            act({ action: 'leave', room: uid }, { room: uid, follow: uid === sel.id ? sel.members.filter(u => u !== uid) : null });
+            return;
+        }
+        busyRooms.add(uid); render();
+        if (!isActive(sel) && own && isActive(own)) {
+            // Keep the music going: fold the idle selection into the playing group.
+            act({ action: 'merge', group: sel.id, into: own.id }, { room: uid });
         } else {
-            iconSpan.innerHTML = '&#9654;';
-            button.setAttribute('onclick', `togglePlayPause('${data.speaker_uid}', 'STOPPED')`);
-        }
-    } else {
-        console.error('Failed to toggle play/pause state:', data.message);
-    }
-}
-
-/* ── Queue ── */
-function clearQueue(speakerUid) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ speaker_uid: speakerUid, action: 'clear_queue' }));
-}
-
-function playTrack(speakerUid, trackIndex) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ speaker_uid: speakerUid, track_index: trackIndex, action: 'play_track' }));
-}
-
-/* ── Volume ── */
-function decreaseVolume(sliderId) {
-    const slider = document.getElementById('volume-slider-' + sliderId);
-    const newVolume = Math.max(parseInt(slider.value) - 10, 0);
-    slider.value = newVolume;
-    return newVolume;
-}
-
-function increaseVolume(sliderId) {
-    const slider = document.getElementById('volume-slider-' + sliderId);
-    const newVolume = Math.min(parseInt(slider.value) + 10, 100);
-    slider.value = newVolume;
-    return newVolume;
-}
-
-function adjustVolume(speakerUid, volume) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ speaker_uid: speakerUid, volume: volume, action: 'volume' }));
-}
-
-/* ── Grouping modal ── */
-function openModal(speakerUUID) {
-    const tile = document.getElementById(`speaker-content-${speakerUUID}`);
-    const modalElement = document.getElementById(`groupModal-${speakerUUID}`);
-
-    if (!modalElement) {
-        console.error(`Could not find the modal for speaker: ${speakerUUID}`);
-        return;
-    }
-
-    const modal = new bootstrap.Modal(modalElement);
-    modalInstances[speakerUUID] = modal;
-
-    modalElement.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.setAttribute('data-original-state', cb.checked ? 'checked' : 'unchecked');
-    });
-
-    if (tile) tile.classList.add('blur-background');
-    modal.show();
-}
-
-function onCheckboxChange(speakerUUID) {
-    const checkboxes = document.querySelectorAll(`#groupModal-${speakerUUID} input[type="checkbox"]`);
-    const applyButton = document.getElementById(`apply-button-${speakerUUID}`);
-    let changed = false;
-
-    checkboxes.forEach(cb => {
-        if (cb.getAttribute('data-original-state') !== (cb.checked ? 'checked' : 'unchecked')) {
-            changed = true;
+            act({ action: 'join', room: uid, group: sel.id }, { room: uid });
         }
     });
 
-    applyButton.disabled = !changed;
-}
-
-function applyGroupChanges(speakerUUID) {
-    const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
-    const checkboxes = document.querySelectorAll(`#groupModal-${speakerUUID} input[type="checkbox"]`);
-    const formData = new FormData();
-    formData.append('speaker_uuid', speakerUUID);
-    formData.append('action', 'toggle_group');
-    formData.append('csrfmiddlewaretoken', csrfToken);
-
-    checkboxes.forEach(cb => {
-        const original = cb.getAttribute('data-original-state');
-        const current = cb.checked ? 'checked' : 'unchecked';
-        if (original !== current) {
-            formData.append('target_speaker_uuid[]', cb.getAttribute('data-speaker-name'));
-        }
+    els.presets.addEventListener('click', e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.preset) act({ action: 'preset', preset: b.dataset.preset });
+        else if (b.dataset.all) act({ action: b.dataset.all });
     });
 
-    fetch('toggle_group/', { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => {
-            if (data.status === 'success') {
-                closeModal(speakerUUID);
-            } else {
-                console.error('Failed to update group:', data.message);
-            }
-        })
-        .catch(err => console.error('Error:', err));
-}
+    els.cards.addEventListener('click', e => {
+        const card = e.target.closest('[data-group]');
+        if (!card) return;
+        const gid = card.dataset.group;
+        const tx = e.target.closest('[data-tx]');
+        const ex = e.target.closest('[data-expand]');
+        const mute = e.target.closest('[data-mute]');
+        if (tx) { act({ action: 'transport', group: gid, op: tx.dataset.tx }); return; }
+        if (ex) { if (expanded.has(gid)) expanded.delete(gid); else expanded.add(gid); render(); return; }
+        if (mute) { act({ action: 'room_mute', room: mute.dataset.mute, muted: mute.dataset.muted !== '1' }); return; }
+        if (e.target.closest('input')) return;
+        if (selected !== gid) { selected = gid; render(); }
+    });
 
-function closeModal(speakerUUID) {
-    const tile = document.getElementById(`speaker-content-${speakerUUID}`);
-    const modal = modalInstances[speakerUUID];
-
-    if (modal) {
-        modal.hide();
-        delete modalInstances[speakerUUID];
+    // Volume sliders: send while dragging (throttled) and once on release.
+    const timers = {};
+    function sendVolume(input) {
+        const v = +input.value;
+        if (input.dataset.kind === 'group') act({ action: 'group_volume', group: input.dataset.id, volume: v }, { quiet: true });
+        else act({ action: 'room_volume', room: input.dataset.id, volume: v }, { quiet: true });
     }
-    if (tile) tile.classList.remove('blur-background');
-}
+    els.cards.addEventListener('input', e => {
+        const s = e.target;
+        if (!s.classList.contains('sl')) return;
+        s.style.setProperty('--p', s.value + '%');
+        const num = s.parentElement.querySelector('.num, .pct');
+        if (num) num.textContent = s.value;
+        const key = s.dataset.kind + s.dataset.id;
+        if (!timers[key]) timers[key] = setTimeout(() => { timers[key] = null; sendVolume(s); }, 250);
+    });
+    els.cards.addEventListener('change', e => {
+        if (e.target.classList.contains('sl')) sendVolume(e.target);
+    });
+    els.cards.addEventListener('pointerdown', e => { if (e.target.classList.contains('sl')) dragging++; });
+    window.addEventListener('pointerup', () => { if (dragging) setTimeout(() => { dragging = 0; }, 400); });
+    window.addEventListener('pointercancel', () => { dragging = 0; });
 
-/* ── Speaker data updates (via WebSocket) ── */
-function updateSpeakerData(speakerData) {
-    updateSpeakerTabs(speakerData);
-    for (const id in speakerData) {
-        updateSpeakerContent(id, speakerData[id]);
-    }
-    activateSpeakerTab(activeSpeaker);
-}
-
-function updateSpeakerTabs(speakerData) {
-    const container = document.getElementById('speaker-tabs');
-    container.innerHTML = '';
-
-    let isFirst = true;
-    for (const id in speakerData) {
-        const tab = document.createElement('a');
-        tab.classList.add('nav-link');
-        tab.id = `speaker-tab-${id}`;
-        tab.setAttribute('data-bs-toggle', 'tab');
-        tab.href = `#speaker-content-${id}`;
-        tab.setAttribute('role', 'tab');
-        tab.setAttribute('aria-controls', `speaker-content-${id}`);
-        tab.setAttribute('aria-selected', 'false');
-        tab.textContent = speakerData[id].group_label;
-
-        if ((activeSpeaker == null && isFirst) || activeSpeaker == id) {
-            tab.classList.add('active');
-            tab.setAttribute('aria-selected', 'true');
-            if (activeSpeaker == null) activeSpeaker = id;
-            isFirst = false;
-        }
-
-        tab.addEventListener('shown.bs.tab', function (e) {
-            activeSpeaker = e.target.getAttribute('href').replace('#speaker-content-', '');
-        });
-
-        container.appendChild(tab);
-    }
-}
-
-function updateSpeakerContent(speakerId, data) {
-    let el = document.getElementById(`speaker-content-${speakerId}`);
-
-    /* Create content dynamically if it doesn't exist yet */
-    if (!el) {
-        const tabContent = document.getElementById('speaker-tabContent');
-        el = document.createElement('div');
-        el.id = `speaker-content-${speakerId}`;
-        el.classList.add('tab-pane', 'fade');
-        el.setAttribute('role', 'tabpanel');
-        el.setAttribute('aria-labelledby', `speaker-tab-${speakerId}`);
-
-        el.innerHTML = `
-            <div class="card mb-3">
-                <div class="row no-gutters">
-                    <div class="col-12">
-                        <h2 class="mt-3 text-center">${data.group_label}</h2>
-                        <div class="album-art-container position-relative">
-                            <img src="${data.album_art || '{% static "default_album_art.webp" %}'}"
-                                 class="img-fluid album-art" alt="Album Art"
-                                 onerror="this.onerror=null;this.src='{% static "default_album_art.webp" %}';">
-                            <button class="btn play-pause-btn position-absolute"
-                                    id="play-pause-button-${speakerId}"
-                                    onclick="togglePlayPause('${speakerId}', '${data.play_state}')">
-                                <span class="icon">
-                                    ${data.play_state === 'PLAYING' ? '&#10074;&#10074;' : '&#9654;'}
-                                </span>
-                            </button>
-                            <div class="audio-visualizer position-absolute top-0 end-0 rounded p-1${data.play_state !== 'PLAYING' ? ' hidden' : ''}"
-                                 id="audio-visualizer-${speakerId}">
-                                <div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                                <div class="bar"></div><div class="bar"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12">
-                        <h5 class="track-title"><strong>Title:</strong> ${data.track}</h5>
-                        <p class="track-artist"><strong>Artist:</strong> ${data.artist}</p>
-                        <p class="track-album"><strong>Album:</strong> ${data.album}</p>
-                    </div>
-                    <div class="d-flex align-items-center mt-2 px-2">
-                        <button class="volume-btn volume-down"
-                                onclick="adjustVolume('${speakerId}', decreaseVolume('${speakerId}'))">
-                            <i class="fas fa-volume-down"></i>
-                        </button>
-                        <input type="range" class="volume-slider flex-grow-1 mx-2" min="0" max="100"
-                               value="${data.volume}" id="volume-slider-${speakerId}"
-                               onchange="adjustVolume('${speakerId}', this.value)">
-                        <button class="volume-btn volume-up"
-                                onclick="adjustVolume('${speakerId}', increaseVolume('${speakerId}'))">
-                            <i class="fas fa-volume-up"></i>
-                        </button>
-                        <button onclick="openModal('${speakerId}')" class="btn btn-success btn-sm ms-3">Group</button>
-                    </div>
-                </div>
-                <hr class="my-4">
-                <div class="queue-container">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Queue:</h5>
-                        <button class="btn btn-danger btn-sm" onclick="clearQueue('${speakerId}')">Clear Queue</button>
-                    </div>
-                    <ul class="queue-list list-group"></ul>
-                </div>
-            </div>`;
-        tabContent.appendChild(el);
-    }
-
-    /* Update existing content */
-    const groupLabel = el.querySelector('h2.text-center');
-    if (groupLabel) groupLabel.innerText = data.group_label;
-
-    const albumArt = el.querySelector('.album-art');
-    if (albumArt) albumArt.src = data.album_art || '{% static "default_album_art.webp" %}';
-
-    const playBtn = document.getElementById(`play-pause-button-${speakerId}`);
-    if (playBtn) {
-        const icon = playBtn.querySelector('.icon');
-        icon.innerHTML = data.play_state === 'PLAYING' ? '&#10074;&#10074;'
-                       : data.play_state === 'PAUSED_PLAYBACK' ? '&#9654;'
-                       : icon.innerHTML;
-        playBtn.setAttribute('onclick', `togglePlayPause('${speakerId}', '${data.play_state}')`);
-    }
-
-    const visualizer = document.getElementById(`audio-visualizer-${speakerId}`);
-    if (visualizer) {
-        visualizer.classList.toggle('hidden', data.play_state !== 'PLAYING');
-    }
-
-    const titleEl  = el.querySelector('.track-title strong');
-    const artistEl = el.querySelector('.track-artist strong');
-    const albumEl  = el.querySelector('.track-album strong');
-    if (titleEl)  titleEl.nextSibling.textContent  = ` ${data.track}`;
-    if (artistEl) artistEl.nextSibling.textContent = ` ${data.artist}`;
-    if (albumEl)  albumEl.nextSibling.textContent  = ` ${data.album}`;
-
-    const volumeSlider = document.getElementById(`volume-slider-${speakerId}`);
-    if (volumeSlider) volumeSlider.value = data.volume;
-
-    /* Update queue */
-    const queueList = el.querySelector('.queue-list');
-    queueList.innerHTML = '';
-
-    if (data.queue && data.queue.length > 0) {
-        data.queue.forEach((track, index) => {
-            const li = document.createElement('li');
-            li.classList.add('list-group-item');
-            li.setAttribute('onclick', `playTrack('${speakerId}', ${index})`);
-            li.innerHTML = `
-                <div class="row align-items-center">
-                    <div class="col-auto">
-                        <img src="${track.album_art || '{% static "default_album_art.webp" %}'}"
-                             class="img-fluid queue-album-art" alt="Album Art">
-                    </div>
-                    <div class="col">
-                        <h6 class="mb-1">${track.title}</h6>
-                        <p class="mb-0">${track.artist}</p>
-                    </div>
-                </div>`;
-            queueList.appendChild(li);
-        });
-    } else {
-        const li = document.createElement('li');
-        li.classList.add('list-group-item', 'text-center');
-        li.textContent = 'No tracks in the queue';
-        queueList.appendChild(li);
-    }
-}
-
-function activateSpeakerTab(speakerId) {
-    const activeTab = document.querySelector('#speaker-tabs .nav-link.active');
-    const activePane = document.querySelector('.tab-pane.show.active');
-
-    if (activeTab) { activeTab.classList.remove('active'); activeTab.setAttribute('aria-selected', 'false'); }
-    if (activePane) { activePane.classList.remove('show', 'active'); }
-
-    const newTab  = document.getElementById(`speaker-tab-${speakerId}`);
-    const newPane = document.getElementById(`speaker-content-${speakerId}`);
-
-    if (newTab)  { newTab.classList.add('active');  newTab.setAttribute('aria-selected', 'true'); }
-    if (newPane) { newPane.classList.add('show', 'active'); }
-}
+    poll();
+    setInterval(poll, POLL_MS);
+    document.addEventListener('visibilitychange', poll);
+})();
 </script>
 {% endblock %}

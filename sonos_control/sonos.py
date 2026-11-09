@@ -3,9 +3,11 @@
 Every browser polls the same cached snapshot, so the speakers see a bounded
 amount of traffic no matter how many screens are open.
 """
+import json
 import logging
 import threading
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import soco
@@ -15,6 +17,7 @@ log = logging.getLogger(__name__)
 
 DISCOVERY_TTL = 60
 SNAPSHOT_TTL = 1.5
+NIGHT_TTL = 30
 
 # Where each room sits on the lodge diagram. Keys are Sonos room names.
 #   floor: upper / main / lower (inside) or outside_main / outside_lower
@@ -40,6 +43,8 @@ _zones = {}           # uid -> SoCo
 _zones_at = 0.0
 _snapshot = None
 _snapshot_at = 0.0
+_night = None
+_night_at = 0.0
 _pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='sonos')
 
 
@@ -206,7 +211,41 @@ def _build_snapshot():
             gs['volume'] = round(sum(vols) / len(vols)) if vols else 0
         out_groups.append({'id': cuid, 'members': members, **gs})
     out_groups.sort(key=lambda g: room_rank[g['members'][0]])
-    return {'rooms': rooms, 'groups': out_groups, 'presets': PRESETS, 'ts': time.time()}
+    return {'rooms': rooms, 'groups': out_groups, 'presets': PRESETS,
+            'night': night_status(), 'ts': time.time()}
+
+
+def night_status():
+    """Night volume limit from the appdaemon-sonos-night app, or None.
+
+    BDH_SONOS_CONTROL_NIGHT_URL points at its status endpoint. The limit is
+    enforced there; the hub only shows it and caps its own sliders.
+    """
+    global _night, _night_at
+    url = app_setting('sonos_control', 'night_url', '')
+    if not url:
+        return None
+    if time.monotonic() - _night_at < NIGHT_TTL:
+        return _night
+    try:
+        with urllib.request.urlopen(url, timeout=2) as res:
+            data = json.loads(res.read())
+        _night = {'active': bool(data.get('active')), 'limit': int(data['limit']),
+                  'end': str(data.get('end', '')), 'rooms': list(data.get('rooms') or [])}
+    except Exception as exc:  # noqa: BLE001
+        log.warning('night limit status failed: %s', exc)
+        _night = None
+    _night_at = time.monotonic()
+    return _night
+
+
+def _night_cap(zones_):
+    """The night limit if every one of these zones is under it, else None."""
+    night = night_status()
+    if not night or not night['active']:
+        return None
+    names = set(night['rooms'])
+    return night['limit'] if all(z.player_name in names for z in zones_) else None
 
 
 def snapshot(force=False):
@@ -377,16 +416,18 @@ def transport(group_id, op):
 
 
 def set_group_volume(group_id, volume):
-    _zone(group_id).group.volume = _clamp(volume)
+    group = _zone(group_id).group
+    group.volume = _clamp(volume, _night_cap(list(group.members)))
 
 
 def set_room_volume(uid, volume):
-    _zone(uid).volume = _clamp(volume)
+    z = _zone(uid)
+    z.volume = _clamp(volume, _night_cap([z]))
 
 
 def set_room_mute(uid, muted):
     _zone(uid).mute = bool(muted)
 
 
-def _clamp(v):
-    return max(0, min(100, int(v)))
+def _clamp(v, cap=None):
+    return max(0, min(100 if cap is None else cap, int(v)))

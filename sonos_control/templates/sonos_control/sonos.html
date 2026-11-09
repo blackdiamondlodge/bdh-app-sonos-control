@@ -143,6 +143,21 @@
         background: linear-gradient(var(--c), var(--c)) 0 / var(--p, 0%) 100% no-repeat, rgba(255, 255, 255, .12);
         outline: none; cursor: pointer;
     }
+    input[type=range].sl.capped {
+        background: linear-gradient(var(--c), var(--c)) 0 / var(--p, 0%) 100% no-repeat,
+            repeating-linear-gradient(135deg, rgba(255, 255, 255, .14) 0 4px, transparent 4px 8px) var(--cap) 0 / 100% 100% no-repeat,
+            rgba(255, 255, 255, .12);
+    }
+    .moon { color: #b9c6ff; }
+    .slw { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+    .slw .moon { font-size: 13px; }
+    .night {
+        display: flex; align-items: center; gap: 10px; padding: 10px 16px; margin-bottom: 14px;
+        border-radius: 14px; font-size: 14px; color: rgba(255, 255, 255, .8);
+        background: rgba(120, 140, 255, .14); border: 1px solid rgba(160, 175, 255, .25);
+    }
+    .night i { font-size: 16px; }
+    .night b { color: #fff; }
     input[type=range].sl::-webkit-slider-thumb {
         -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
         background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
@@ -287,6 +302,7 @@
 
 <div id="music">
     <div class="presets" id="presets"></div>
+    <div id="night"></div>
     <div class="players" id="players"></div>
     <div class="tip">
         <i class="fas fa-mobile-screen-button"></i>
@@ -341,7 +357,7 @@
     const POLL_MS = 2000;
 
     const els = {
-        presets: document.getElementById('presets'), players: document.getElementById('players'),
+        presets: document.getElementById('presets'), night: document.getElementById('night'), players: document.getElementById('players'),
         picker: document.getElementById('picker'), pkRooms: document.getElementById('pk-rooms'),
         pkTitle: document.getElementById('pk-title'), pkAv: document.getElementById('pk-av'),
         pkDone: document.getElementById('pk-done'), confirm: document.getElementById('confirm'),
@@ -368,10 +384,29 @@
     const names = uids => uids.map(u => (roomById(u) || {}).label || '?');
     const titleOf = g => g.title || (g.source && g.source.name) || 'music';
 
+    // Night limit (enforced by AppDaemon): the cap for these rooms, or null.
+    const nightOn = () => !!(state.night && state.night.active);
+    const limited = uid => nightOn() && state.night.rooms.includes((roomById(uid) || {}).name);
+    const capOf = uids => (uids.length && uids.every(limited)) ? state.night.limit : null;
+    const clock = hm => {
+        const [h, m] = String(hm).split(':').map(Number);
+        return isNaN(h) ? hm : `${h % 12 || 12}:${String(m || 0).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`;
+    };
+
+    function renderNight() {
+        const n = state.night;
+        els.night.innerHTML = nightOn()
+            ? `<div class="night"><i class="fas fa-moon moon"></i><span><b>Quiet hours</b> &middot; outdoor speakers ` +
+              `are limited to <b>${n.limit}%</b> until ${esc(clock(n.end))}</span></div>`
+            : '';
+    }
+
     // ------------------------------------------------------------ players
-    function slider(kind, id, value) {
-        return `<input type="range" class="sl" min="0" max="100" value="${value}" style="--p:${value}%" ` +
-            `data-kind="${kind}" data-id="${esc(id)}">`;
+    function slider(kind, id, value, cap) {
+        const input = `<input type="range" class="sl${cap == null ? '' : ` capped" data-cap="${cap}`}" min="0" max="100" value="${value}" ` +
+            `style="--p:${value}%${cap == null ? '' : `;--cap:${cap}%`}" data-kind="${kind}" data-id="${esc(id)}">`;
+        if (cap == null) return input;
+        return `<span class="slw">${input}<i class="fas fa-moon moon" title="Night limit ${cap}%"></i></span>`;
     }
 
     function avatar(g) {
@@ -402,7 +437,7 @@
         const rooms = open ? '<div class="rooms">' + g.members.map(u => {
             const r = roomById(u);
             return `<div class="room"><i class="fas ${esc(r.icon)} ic"></i><span class="lbl">${esc(r.label)}</span>` +
-                slider('room', u, r.volume) + `<span class="pct">${r.volume}</span>` +
+                slider('room', u, r.volume, capOf([u])) + `<span class="pct">${r.volume}</span>` +
                 `<button class="mute ${r.muted ? 'on' : ''}" data-mute="${esc(u)}" data-muted="${r.muted ? 1 : 0}" title="Mute">` +
                 `<i class="fas ${r.muted ? 'fa-volume-xmark' : 'fa-volume-high'}"></i></button></div>`;
         }).join('') + '</div>' : '';
@@ -413,7 +448,7 @@
             `<div class="tx"><button data-tx="previous"><i class="fas fa-backward-step"></i></button>` +
             `<button class="pp" data-tx="${playing ? 'pause' : 'play'}"><i class="fas ${playing ? 'fa-pause' : 'fa-play'}"></i></button>` +
             `<button data-tx="next"><i class="fas fa-forward-step"></i></button></div></div>` +
-            `<div class="vol"><i class="fas fa-volume-low"></i>${slider('group', g.id, g.volume)}<span class="num">${g.volume}</span>` +
+            `<div class="vol"><i class="fas fa-volume-low"></i>${slider('group', g.id, g.volume, capOf(g.members))}<span class="num">${g.volume}</span>` +
             (multi ? `<button class="round-btn ${open ? 'on' : ''}" data-expand="${esc(g.id)}" title="Room volumes"><i class="fas fa-sliders"></i></button>` : '') +
             `</div>${rooms}</div>`;
     }
@@ -425,7 +460,7 @@
         const name = `<b>${esc(names(g.members).join(' + '))}</b>`;
         return `<div class="glass p idle ${multi ? 'multi' : ''}" data-group="${esc(g.id)}">` +
             `${avatar(g)}<div class="nm"><small>${label}</small>${name}</div>` +
-            `<div class="vol"><i class="fas fa-volume-low"></i>${slider('group', g.id, g.volume)}<span class="num">${g.volume}</span></div>` +
+            `<div class="vol"><i class="fas fa-volume-low"></i>${slider('group', g.id, g.volume, capOf(g.members))}<span class="num">${g.volume}</span></div>` +
             `${roomsBtn(g)}</div>`;
     }
 
@@ -563,6 +598,7 @@
     // ------------------------------------------------------------ render / network
     function render() {
         if (!state) return;
+        renderNight();
         renderPlayers();
         renderPicker();
     }
@@ -677,8 +713,9 @@
     els.players.addEventListener('input', e => {
         const s = e.target;
         if (!s.classList.contains('sl')) return;
+        if (s.dataset.cap && +s.value > +s.dataset.cap) s.value = s.dataset.cap;
         s.style.setProperty('--p', s.value + '%');
-        const num = s.parentElement.querySelector('.num, .pct');
+        const num = s.closest('.vol, .room').querySelector('.num, .pct');
         if (num) num.textContent = s.value;
         const key = s.dataset.kind + s.dataset.id;
         if (!timers[key]) timers[key] = setTimeout(() => { timers[key] = null; sendVolume(s); }, 250);

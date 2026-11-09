@@ -23,6 +23,12 @@ Settings (environment):
   interface on the Sonos network, for Docker with host networking.
 - `BDH_SONOS_CONTROL_MODELS`: comma-separated model names to control
   (default `Amp`).
+- `BDH_SONOS_CONTROL_NIGHT_URL`: status endpoint of the
+  [appdaemon-sonos-night](https://github.com/sslivins/appdaemon-sonos-night)
+  app, e.g. `http://192.168.10.217:5050/api/appdaemon/sonos_night`. During
+  quiet hours the page shows the limit and caps the outdoor sliders. The limit
+  itself is enforced by that app, so phones can't get around it. Unset means
+  no night limit is shown.
 
 Room names, floors and presets are in `sonos_control/sonos.py`.
 

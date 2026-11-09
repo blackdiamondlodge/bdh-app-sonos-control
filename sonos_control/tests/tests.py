@@ -191,6 +191,52 @@ class SnapshotTests(TestCase):
         self.zs[1].unjoin.assert_called_once()
         self.zs[0].unjoin.assert_not_called()
 
+    NIGHT = {'active': True, 'limit': 25, 'end': '07:00', 'rooms': ['Top Deck', 'Hot Tub']}
+
+    def test_night_limit_caps_outdoor_room_volume(self):
+        with patch('sonos_control.sonos.night_status', return_value=self.NIGHT):
+            sonos.set_room_volume('TD', 80)
+            sonos.set_room_volume('DR', 80)
+        self.assertEqual(self.zs[1].volume, 25)
+        self.assertEqual(self.zs[0].volume, 80)
+
+    def test_night_limit_caps_group_only_when_all_rooms_limited(self):
+        with patch('sonos_control.sonos.night_status', return_value=self.NIGHT):
+            sonos.set_group_volume('HT', 70)
+            sonos.set_group_volume('DR', 70)
+        self.assertEqual(self.zs[2].group.volume, 25)
+        self.assertEqual(self.zs[0].group.volume, 70)
+
+    def test_inactive_night_limit_does_not_cap(self):
+        with patch('sonos_control.sonos.night_status', return_value=dict(self.NIGHT, active=False)):
+            sonos.set_room_volume('TD', 80)
+        self.assertEqual(self.zs[1].volume, 80)
+
+
+class NightStatusTests(TestCase):
+    def setUp(self):
+        sonos._night_at = 0.0
+
+    tearDown = setUp
+
+    def test_off_without_url(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('BDH_SONOS_CONTROL_NIGHT_URL', None)
+            self.assertIsNone(sonos.night_status())
+
+    @patch('sonos_control.sonos.urllib.request.urlopen')
+    def test_reads_appdaemon_status(self, urlopen):
+        body = b'{"active": true, "limit": 25, "end": "07:00", "rooms": ["Top Deck"], "overridden": false}'
+        urlopen.return_value.__enter__.return_value.read.return_value = body
+        with patch.dict(os.environ, {'BDH_SONOS_CONTROL_NIGHT_URL': 'http://ad/api/appdaemon/sonos_night'}):
+            self.assertEqual(sonos.night_status(),
+                             {'active': True, 'limit': 25, 'end': '07:00', 'rooms': ['Top Deck']})
+
+    @patch('sonos_control.sonos.urllib.request.urlopen', side_effect=OSError('down'))
+    def test_unreachable_means_no_limit_shown(self, urlopen):
+        with patch.dict(os.environ, {'BDH_SONOS_CONTROL_NIGHT_URL': 'http://ad/x'}):
+            self.assertIsNone(sonos.night_status())
+
 
 class SourceTests(TestCase):
     def test_sources(self):

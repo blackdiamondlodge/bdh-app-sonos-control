@@ -157,9 +157,34 @@ class SnapshotTests(TestCase):
         self.zs[1].unjoin.assert_called_once()
         self.assertIs(self.zs[2].group.coordinator, self.zs[0])
 
-    def test_merge_moves_idle_group_into_playing_one(self):
-        self.assertEqual(sonos.merge('HT', 'DR'), 'DR')
-        self.assertIs(self.zs[2].group.coordinator, self.zs[0])
+    def _lower_deck_with_hot_tub(self):
+        ld = FakeZone('Lower Deck', 'LD')
+        FakeGroup(self.zs[2], [self.zs[2], ld])
+        HOUSEHOLD.append(ld)
+        sonos._zones['LD'] = ld
+        return ld
+
+    def test_set_rooms_pulls_room_from_another_group(self):
+        ld = self._lower_deck_with_hot_tub()
+        self.assertEqual(sonos.set_rooms('DR', ['DR', 'TD', 'LD']), 'DR')
+        self.assertIs(ld.group.coordinator, self.zs[0])
+        self.assertEqual(self.zs[2].group.members, [self.zs[2]])
+
+    @patch('sonos_control.sonos.time.sleep')
+    def test_set_rooms_unticking_coordinator_keeps_the_rest(self, sleep):
+        self.zs[0].avTransport.DelegateGroupCoordinationTo.side_effect = Exception('nope')
+        self.assertEqual(sonos.set_rooms('DR', ['TD', 'HT']), 'TD')
+        self.assertIs(self.zs[2].group.coordinator, self.zs[1])
+        self.assertEqual(self.zs[0].group.members, [self.zs[0]])
+
+    def test_set_rooms_from_solo_player(self):
+        self.assertEqual(sonos.set_rooms('HT', ['HT', 'TD']), 'HT')
+        self.assertIs(self.zs[1].group.coordinator, self.zs[2])
+        self.assertEqual(self.zs[0].group.members, [self.zs[0]])
+
+    def test_set_rooms_needs_a_room(self):
+        with self.assertRaises(sonos.SonosError):
+            sonos.set_rooms('DR', [])
 
     def test_ungroup_all(self):
         sonos.ungroup_all()
@@ -180,7 +205,7 @@ class ViewTests(TestCase):
         res = self.client.get(reverse('sonos_control'))
         self.assertEqual(res.status_code, 200)
         content = res.content.decode()
-        self.assertIn('id="room-layer"', content)
+        self.assertIn('id="picker"', content)
         self.assertNotIn('spotify_search', content)
 
     @patch('sonos_control.views.sonos.snapshot', return_value={'rooms': [], 'groups': [], 'presets': []})
@@ -202,8 +227,8 @@ class ViewTests(TestCase):
     @patch('sonos_control.views.sonos.snapshot', return_value={'rooms': [], 'groups': [], 'presets': []})
     @patch('sonos_control.views.sonos.set_group', return_value='DR')
     def test_preset_action(self, set_group, snap, sleep):
-        res = self.post({'action': 'preset', 'preset': 'outside'})
-        set_group.assert_called_once_with(['Top Deck', 'Lower Deck', 'Hot Tub'])
+        res = self.post({'action': 'preset', 'preset': 'dining_deck'})
+        set_group.assert_called_once_with(['Dining Room', 'Top Deck'])
         self.assertEqual(res.json()['selected'], 'DR')
 
     @patch('sonos_control.views.sonos.snapshot', return_value={'rooms': [], 'groups': [], 'presets': []})
@@ -212,6 +237,14 @@ class ViewTests(TestCase):
         self.assertEqual(self.post({'action': 'room_volume', 'room': 'DR', 'volume': 20}).status_code, 200)
         set_vol.assert_called_once_with('DR', 20)
 
-    @patch('sonos_control.views.sonos.join', side_effect=RuntimeError('timeout'))
-    def test_speaker_failure_is_reported(self, join):
-        self.assertEqual(self.post({'action': 'join', 'room': 'HT', 'group': 'DR'}).status_code, 502)
+    @patch('sonos_control.views.time.sleep')
+    @patch('sonos_control.views.sonos.snapshot', return_value={'rooms': [], 'groups': [], 'presets': []})
+    @patch('sonos_control.views.sonos.set_rooms', return_value='DR')
+    def test_set_rooms_action(self, set_rooms, snap, sleep):
+        res = self.post({'action': 'set_rooms', 'room': 'DR', 'rooms': ['DR', 'HT']})
+        self.assertEqual(res.status_code, 200)
+        set_rooms.assert_called_once_with('DR', ['DR', 'HT'])
+
+    @patch('sonos_control.views.sonos.set_rooms', side_effect=RuntimeError('timeout'))
+    def test_speaker_failure_is_reported(self, set_rooms):
+        self.assertEqual(self.post({'action': 'set_rooms', 'room': 'HT', 'rooms': ['HT', 'DR']}).status_code, 502)

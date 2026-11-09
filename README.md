@@ -1,10 +1,13 @@
 # bdh-app-sonos-control
 
-Black Diamond Hub app for the lodge's Sonos amps: a diagram of the lodge
-where you tap rooms to group them, preset groups (Whole Lodge, All
-Outside, Deck + Hot Tub), Ungroup all and Pause all, group and per-room
-volume, and play/pause/skip. Guests play music from their own phones
-(Spotify Connect, AirPlay and so on); the soundbars are left to the TVs.
+Black Diamond Hub app for the lodge's Sonos amps. Every room or group is
+a player card (playing ones first, idle ones as compact rows) with
+play/pause/skip and volume; group cards expand to per-room volume and mute.
+Each card's Rooms button opens a picture of the lodge where you tick the
+rooms that play together (a room already in another group can be moved
+after a confirmation). Quick groups (Dining + Top Deck, Whole Lodge),
+Ungroup all and Pause all sit on top. Guests play music from their own
+phones (Spotify Connect, AirPlay and so on); the soundbars are left to the TVs.
 Moved out of
 [BlackDiamondHub](https://github.com/blackdiamondlodge/BlackDiamondHub) and
 installed into the hub through the `blackdiamondhub.plugins` entry point

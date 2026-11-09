@@ -28,9 +28,7 @@ def state(request):
 
 
 ACTIONS = {
-    'join': (lambda d: sonos.join(d['room'], d['group']), True),
-    'merge': (lambda d: sonos.merge(d['group'], d['into']), True),
-    'leave': (lambda d: sonos.leave(d['room']), True),
+    'set_rooms': (lambda d: sonos.set_rooms(d['room'], d['rooms']), True),
     'preset': (lambda d: sonos.set_group(_preset_rooms(d['preset'])), True),
     'ungroup_all': (lambda d: sonos.ungroup_all(), True),
     'pause_all': (lambda d: sonos.pause_all(), False),

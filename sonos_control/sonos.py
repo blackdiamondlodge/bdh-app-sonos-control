@@ -28,11 +28,9 @@ LAYOUT = {
 }
 
 PRESETS = [
+    {'id': 'dining_deck', 'label': 'Dining + Top Deck', 'icon': 'fa-utensils',
+     'rooms': ['Dining Room', 'Top Deck']},
     {'id': 'whole', 'label': 'Whole Lodge', 'icon': 'fa-house', 'rooms': '*'},
-    {'id': 'outside', 'label': 'All Outside', 'icon': 'fa-tree',
-     'rooms': ['Top Deck', 'Lower Deck', 'Hot Tub']},
-    {'id': 'hottub', 'label': 'Deck + Hot Tub', 'icon': 'fa-hot-tub-person',
-     'rooms': ['Lower Deck', 'Hot Tub']},
 ]
 
 FLOOR_ORDER = ['upper', 'main', 'outside_main', 'lower', 'outside_lower', 'other']
@@ -271,14 +269,46 @@ def join(uid, target_group):
     z.join(coord.group.coordinator)
 
 
-def merge(source_group, target_group):
-    """Move every room of one group into another (target keeps playing)."""
-    target = _zone(target_group).group.coordinator
-    members = [m for m in _zone(source_group).group.members if m.uid != target.uid]
-    # Members first, then the old coordinator once it stands alone.
-    for m in sorted(members, key=lambda m: m.is_coordinator):
-        m.join(target)
-    return target.uid
+def _refresh(z):
+    try:
+        z.zone_group_state.clear_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def set_rooms(room, uids):
+    """Make the player that `room` belongs to contain exactly `uids`.
+
+    Rooms pulled in from other groups leave them without stopping the music
+    there. The player keeps its current coordinator (and what it is playing)
+    whenever that room stays in.
+    """
+    zs = zones()
+    wanted = [u for u in dict.fromkeys(uids or []) if u in zs]
+    if not wanted:
+        raise SonosError('Pick at least one room')
+    group = _zone(room).group
+    coord = group.coordinator
+    current = [m.uid for m in group.members if m.uid in zs]
+    kept = [u for u in current if u in wanted]
+    anchor = coord if coord.uid in wanted else zs[(kept or wanted)[0]]
+
+    # Drop unticked rooms; the coordinator goes last so its hand-off lands on a kept room.
+    drop = sorted((zs[u] for u in current if u not in wanted), key=lambda z: z.uid == coord.uid)
+    for z in drop:
+        _leave(z)
+    if coord.uid not in wanted and kept:
+        time.sleep(0.5)  # let the coordinator hand-off settle
+    _refresh(anchor)
+
+    if anchor.uid not in current and len(anchor.group.members) > 1:
+        _leave(anchor)
+        _refresh(anchor)
+    for u in wanted:
+        if u != anchor.uid:
+            join(u, anchor.uid)
+    _refresh(anchor)
+    return anchor.group.coordinator.uid
 
 
 def leave(uid):

@@ -115,7 +115,11 @@ class DiscoveryTests(TestCase):
 
 class SiteConfigTests(TestCase):
     def test_default_preset_is_everywhere(self):
-        self.assertEqual([p['rooms'] for p in sonos.presets()], ['*'])
+        from django.conf import settings
+        with override_settings():
+            if hasattr(settings, 'BDH_SONOS_CONTROL_PRESETS'):  # the hub's site.toml may set one
+                del settings.BDH_SONOS_CONTROL_PRESETS
+            self.assertEqual([p['rooms'] for p in sonos.presets()], ['*'])
 
     @override_settings(BDH_SONOS_CONTROL_ROOMS={'Kitchen': {'label': 'Kitchen', 'icon': 'fa-utensils'}})
     def test_rooms_from_django_setting(self):
@@ -323,3 +327,91 @@ class ViewTests(TestCase):
     @patch('sonos_control.views.sonos.set_rooms', side_effect=RuntimeError('timeout'))
     def test_speaker_failure_is_reported(self, set_rooms):
         self.assertEqual(self.post({'action': 'set_rooms', 'room': 'HT', 'rooms': ['HT', 'DR']}).status_code, 502)
+
+def snap(*states):
+    """A snapshot with groups DR (Dining Room + Top Deck) and HT (Hot Tub)."""
+    rooms = [{'uid': 'DR', 'label': 'Dining'}, {'uid': 'TD', 'label': 'Top Deck'},
+             {'uid': 'HT', 'label': 'Hot Tub'}]
+    groups = [{'id': 'DR', 'members': ['DR', 'TD'], 'state': states[0], 'title': 'Song',
+               'artist': 'Band', 'art': 'http://10.0.0.5:1400/getaa?x'},
+              {'id': 'HT', 'members': ['HT'], 'state': states[1], 'title': '', 'artist': '', 'art': ''}]
+    return {'rooms': rooms, 'groups': groups}
+
+
+class HomepageTileTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.now = 1000.0
+        p = patch('sonos_control.homepage.time.time', side_effect=lambda: self.now)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def status(self, *states):
+        from sonos_control import homepage
+        with patch('sonos_control.homepage.sonos.snapshot', return_value=snap(*states)):
+            return homepage.status()
+
+    def test_lists_only_playing_groups(self):
+        s = self.status('PLAYING', 'PAUSED_PLAYBACK')
+        self.assertEqual(s.text, '1 playing')
+        self.assertEqual(s.refresh, 3)
+        (row,) = s.rows
+        self.assertEqual((row.id, row.title, row.detail), ('DR', 'Dining + Top Deck', 'Song – Band'))
+        self.assertEqual([a.id for a in row.actions], ['pause', 'next'])
+        self.assertEqual([a.id for a in s.actions], ['pause_all'])
+
+    def test_nothing_playing_shows_no_status(self):
+        self.assertIsNone(self.status('PAUSED_PLAYBACK', 'STOPPED'))
+
+    def test_paused_group_stays_dimmed_during_grace(self):
+        self.status('PLAYING', 'STOPPED')
+        self.now += 60
+        s = self.status('PAUSED_PLAYBACK', 'STOPPED')
+        self.assertEqual(s.text, 'Paused')
+        self.assertTrue(s.rows[0].dimmed)
+        self.assertEqual(s.rows[0].actions[0].id, 'play')
+        self.now += 300
+        self.assertIsNone(self.status('PAUSED_PLAYBACK', 'STOPPED'))
+
+    @override_settings(BDH_SONOS_CONTROL_PAUSE_GRACE=1)
+    def test_grace_setting(self):
+        self.status('PLAYING', 'STOPPED')
+        self.now += 30
+        self.assertIsNotNone(self.status('PAUSED_PLAYBACK', 'STOPPED'))
+        self.now += 59
+        self.assertIsNotNone(self.status('PAUSED_PLAYBACK', 'STOPPED'))
+        self.now += 2
+        self.assertIsNone(self.status('PAUSED_PLAYBACK', 'STOPPED'))
+
+    @patch('sonos_control.homepage.sonos.transport')
+    def test_row_pause_shows_at_once(self, transport):
+        from sonos_control import homepage
+        self.status('PLAYING', 'STOPPED')
+        homepage.run_action('DR', 'pause')
+        transport.assert_called_once_with('DR', 'pause')
+        s = self.status('PLAYING', 'STOPPED')  # speakers haven't caught up yet
+        self.assertTrue(s.rows[0].dimmed)
+
+    @patch('sonos_control.homepage.sonos.transport')
+    @patch('sonos_control.homepage.sonos.pause_all')
+    def test_pause_all_then_resume(self, pause_all, transport):
+        from sonos_control import homepage
+        self.status('PLAYING', 'PLAYING')
+        homepage.run_action('', 'pause_all')
+        pause_all.assert_called_once()
+        self.now += 10
+        s = self.status('PAUSED_PLAYBACK', 'PAUSED_PLAYBACK')
+        self.assertEqual([a.id for a in s.actions], ['resume'])
+        homepage.run_action('', 'resume')
+        self.assertEqual(sorted(c.args for c in transport.call_args_list), [('DR', 'play'), ('HT', 'play')])
+
+    def test_unknown_action(self):
+        from sonos_control import homepage
+        with self.assertRaises(sonos.SonosError):
+            homepage.run_action('DR', 'format_disk')
+
+    def test_snapshot_failure_hides_status(self):
+        from sonos_control import homepage
+        with patch('sonos_control.homepage.sonos.snapshot', side_effect=OSError('down')):
+            self.assertIsNone(homepage.status())

@@ -18,6 +18,12 @@ Page: `/sonos_control/`. The page polls `state/` every 2 seconds and
 sends changes to `action/`. Every screen shares one cached snapshot, so
 the speakers see the same traffic however many screens are open.
 
+On the hub's homepage the Music tile lists the groups that are playing, each
+with play/pause and skip, and a pause-everything button (which becomes
+Resume). Paused groups stay on the tile, dimmed, for `pause_grace`
+minutes so a quick pause can be undone there; groups that were already
+paused are never listed, since idle Sonos speakers sit paused for months.
+
 Settings (each reads the Settings page, then the environment variable,
 then the Django setting of the same name; the hub fills the Django settings
 from `[apps.sonos_control]` in its `sites/<site>/site.toml`):
@@ -39,6 +45,8 @@ from `[apps.sonos_control]` in its `sites/<site>/site.toml`):
   quiet hours the page shows the limit and caps the outdoor sliders. The limit
   itself is enforced by that app, so phones can't get around it. Unset means
   no night limit is shown.
+- `BDH_SONOS_CONTROL_PAUSE_GRACE`: minutes a paused group stays on the
+  homepage Music tile (default 5, also on the Settings page).
 
 ## Development
 

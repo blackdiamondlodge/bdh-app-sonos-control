@@ -7,7 +7,9 @@ Each card's Rooms button opens a picture of the house (or a plain grid of
 rooms when no floors are configured) where you tick the
 rooms that play together (a room already in another group can be moved
 after a confirmation). Quick groups (configured per site),
-Ungroup all and Pause all sit on top. Guests play music from their own
+Ungroup all and Pause all sit on top, and every group card has an Ungroup
+button. A soundbar playing its TV (or a line-in) gets volume only, and Pause
+all and the homepage tile leave it alone. Guests play music from their own
 phones (Spotify Connect, AirPlay and so on).
 Moved out of
 [BlackDiamondHub](https://github.com/blackdiamondlodge/BlackDiamondHub) and
@@ -30,8 +32,15 @@ from `[apps.sonos_control]` in its `sites/<site>/site.toml`):
 
 - `BDH_SONOS_CONTROL_INTERFACE` (legacy `SONOS_INTERFACE`): IP of the
   interface on the Sonos network, for Docker with host networking.
+- `BDH_SONOS_CONTROL_SPEAKERS`: Speakers to show, the Sonos room uids this
+  hub controls. On the Settings page it is a checklist of every room found on
+  the network (ticked rooms that are offline stay listed); new speakers stay
+  hidden until ticked. A group that mixes ticked and unticked rooms shows the
+  unticked ones greyed out, without controls; ungrouping such a group pauses
+  an unticked room left playing. Until this is saved, `models` decides.
 - `BDH_SONOS_CONTROL_MODELS`: comma-separated model names to control
-  (default `Amp`); `*` controls every Sonos.
+  (default `Amp`); `*` controls every Sonos. Ignored once Speakers to show
+  has been saved.
 - `BDH_SONOS_CONTROL_ROOMS`: `{sonos room name: {label, floor, icon}}`
   (JSON in the environment). `floor` is `upper` / `main` / `lower` (inside the
   house picture) or `outside_main` / `outside_lower`. If no room has a floor,

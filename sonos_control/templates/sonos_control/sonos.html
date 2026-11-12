@@ -105,6 +105,11 @@
     }
     .rb i { color: #5ec8ff; }
     .rb:active { background: rgba(255, 255, 255, .16); }
+    .rb.ug i { color: #ff8f9a; }
+    .btns { display: flex; gap: 6px; margin-left: auto; flex: none; }
+    .chips span.dim, .room.dim { opacity: .45; }
+    .room.dim .note { grid-column: 3 / -1; font-size: 12px; font-weight: 500; color: rgba(255, 255, 255, .6); }
+    .tvnote { font-size: 12px; color: rgba(255, 255, 255, .6); }
 
     .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; }
     .eq i { width: 3px; background: var(--c); border-radius: 1px; height: 4px; }
@@ -384,6 +389,8 @@
         (g.state === 'PAUSED_PLAYBACK' && !!(g.title || g.source));
     const isPlaying = g => g.state === 'PLAYING' || g.state === 'TRANSITIONING';
     const roomById = id => state.rooms.find(r => r.uid === id);
+    const shownRooms = () => state.rooms.filter(r => r.shown !== false);
+    const isShown = uid => (roomById(uid) || {}).shown !== false;
     const groupById = id => state && state.groups.find(g => g.id === id);
     const groupOfRoom = uid => state.groups.find(g => g.members.includes(uid));
     const names = uids => uids.map(u => (roomById(u) || {}).label || '?');
@@ -422,16 +429,18 @@
     function chips(g) {
         return '<div class="chips">' + g.members.map(u => {
             const r = roomById(u);
-            return `<span><i class="fas ${esc(r.icon)}"></i>${esc(r.label)}</span>`;
+            return `<span${isShown(u) ? '' : ' class="dim" title="Not shown on this hub"'}><i class="fas ${esc(r.icon)}"></i>${esc(r.label)}</span>`;
         }).join('') + '</div>';
     }
 
-    const roomsBtn = g => `<button class="rb" data-rooms="${esc(g.id)}"><i class="fas fa-house-signal"></i> Rooms</button>`;
+    const roomsBtn = g => '<div class="btns">' +
+        (g.members.length > 1 ? `<button class="rb ug" data-ungroup="${esc(g.id)}" title="Give every room its own player"><i class="fas fa-unlink"></i> Ungroup</button>` : '') +
+        `<button class="rb" data-rooms="${esc(g.id)}"><i class="fas fa-house-signal"></i> Rooms</button></div>`;
 
     function activeCard(g, c) {
         const multi = g.members.length > 1;
         const playing = isPlaying(g);
-        const label = multi ? `Group &middot; ${g.members.length} rooms` : (playing ? 'Playing' : 'Paused');
+        const label = multi ? `Group &middot; ${g.members.length} rooms` : (g.tv ? 'TV' : (playing ? 'Playing' : 'Paused'));
         const name = multi ? chips(g) : `<b>${esc(roomById(g.id).label)}</b>`;
         const art = g.art
             ? `<i class="fas fa-music"></i><img src="${esc(g.art)}" alt="" onerror="this.remove()">`
@@ -441,6 +450,10 @@
         const open = multi && expanded.has(g.id);
         const rooms = open ? '<div class="rooms">' + g.members.map(u => {
             const r = roomById(u);
+            if (!isShown(u)) {
+                return `<div class="room dim"><i class="fas ${esc(r.icon)} ic"></i><span class="lbl">${esc(r.label)}</span>` +
+                    '<span class="note">Not shown on this hub</span></div>';
+            }
             return `<div class="room"><i class="fas ${esc(r.icon)} ic"></i><span class="lbl">${esc(r.label)}</span>` +
                 slider('room', u, r.volume, capOf([u])) + `<span class="pct">${r.volume}</span>` +
                 `<button class="mute ${r.muted ? 'on' : ''}" data-mute="${esc(u)}" data-muted="${r.muted ? 1 : 0}" title="Mute">` +
@@ -450,9 +463,10 @@
             `<div class="hd">${avatar(g)}<div class="nm"><small><span class="eq ${playing ? 'on' : ''}"><i></i><i></i><i></i></span>${label}</small>${name}</div>${roomsBtn(g)}</div>` +
             `<div class="np"><div class="art">${art}</div><div class="meta"><div class="t">${esc(titleOf(g))}</div>` +
             `<div class="a">${esc(g.artist)}</div>${src}</div>` +
+            (g.tv ? '<div class="tx"><span class="tvnote">Volume only</span></div></div>' :
             `<div class="tx"><button data-tx="previous"><i class="fas fa-backward-step"></i></button>` +
             `<button class="pp" data-tx="${playing ? 'pause' : 'play'}"><i class="fas ${playing ? 'fa-pause' : 'fa-play'}"></i></button>` +
-            `<button data-tx="next"><i class="fas fa-forward-step"></i></button></div></div>` +
+            `<button data-tx="next"><i class="fas fa-forward-step"></i></button></div></div>`) +
             `<div class="vol"><i class="fas fa-volume-low"></i>${slider('group', g.id, g.volume, capOf(g.members))}<span class="num">${g.volume}</span>` +
             (multi ? `<button class="round-btn ${open ? 'on' : ''}" data-expand="${esc(g.id)}" title="Room volumes"><i class="fas fa-sliders"></i></button>` : '') +
             `</div>${rooms}</div>`;
@@ -470,7 +484,7 @@
     }
 
     function renderPlayers() {
-        if (!state.rooms.length) {
+        if (!shownRooms().length) {
             els.players.innerHTML = '<div class="glass empty"><i class="fas fa-satellite-dish"></i>Looking for the speakers\u2026</div>';
             return;
         }
@@ -499,7 +513,7 @@
     function layoutRooms() {
         const pos = {};
         const by = {};
-        state.rooms.forEach(r => (by[r.floor] = by[r.floor] || []).push(r));
+        shownRooms().forEach(r => (by[r.floor] = by[r.floor] || []).push(r));
         const place = (list, x0, width, top, maxW) => {
             if (!list || !list.length) return;
             const gap = 2;
@@ -543,13 +557,14 @@
 
     function renderPicker() {
         if (!pk || !state) return;
-        const flat = !state.rooms.some(r => r.floor && r.floor !== 'other');
+        const rooms = shownRooms();
+        const flat = !rooms.some(r => r.floor && r.floor !== 'other');
         document.getElementById('pk-stage').classList.toggle('flat', flat);
         const pos = flat ? {} : layoutRooms();
         let html = '';
-        if (!flat && state.rooms.some(r => r.floor === 'outside_main')) html += '<div class="deck" style="left:58%;top:62%;width:38%"></div>';
-        if (!flat && state.rooms.some(r => r.floor === 'outside_lower' || r.floor === 'other')) html += '<div class="deck" style="left:58%;top:89%;width:38%"></div>';
-        state.rooms.forEach(r => {
+        if (!flat && rooms.some(r => r.floor === 'outside_main')) html += '<div class="deck" style="left:58%;top:62%;width:38%"></div>';
+        if (!flat && rooms.some(r => r.floor === 'outside_lower' || r.floor === 'other')) html += '<div class="deck" style="left:58%;top:89%;width:38%"></div>';
+        rooms.forEach(r => {
             const p = pos[r.uid];
             const info = pickInfo(r);
             const style = p ? ` style="left:${p.left}%;top:${p.top}%;width:${p.w}%;height:${p.h}%"` : '';
@@ -573,7 +588,8 @@
     function openPicker(gid) {
         const g = groupById(gid);
         if (!g) return;
-        pk = { origin: gid, orig: new Set(g.members), pick: new Set(g.members), busy: false };
+        const mine = g.members.filter(isShown);
+        pk = { origin: gid, orig: new Set(mine), pick: new Set(mine), busy: false };
         els.picker.classList.add('open');
         renderPicker();
     }
@@ -670,7 +686,9 @@
         const ex = e.target.closest('[data-expand]');
         const mute = e.target.closest('[data-mute]');
         const rb = e.target.closest('[data-rooms]');
+        const ug = e.target.closest('[data-ungroup]');
         if (rb) { openPicker(rb.dataset.rooms); return; }
+        if (ug) { act({ action: 'ungroup', group: ug.dataset.ungroup }); return; }
         if (tx) { act({ action: 'transport', group: gid, op: tx.dataset.tx }); return; }
         if (ex) { if (expanded.has(gid)) expanded.delete(gid); else expanded.add(gid); render(); return; }
         if (mute) act({ action: 'room_mute', room: mute.dataset.mute, muted: mute.dataset.muted !== '1' });

@@ -30,6 +30,7 @@ def state(request):
 ACTIONS = {
     'set_rooms': (lambda d: sonos.set_rooms(d['room'], d['rooms']), True),
     'preset': (lambda d: sonos.set_group(_preset_rooms(d['preset'])), True),
+    'ungroup': (lambda d: sonos.ungroup(d['group']), True),
     'ungroup_all': (lambda d: sonos.ungroup_all(), True),
     'pause_all': (lambda d: sonos.pause_all(), False),
     'transport': (lambda d: sonos.transport(d['group'], d['op']), False),

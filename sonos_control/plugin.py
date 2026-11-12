@@ -1,5 +1,5 @@
 from bdh_sdk import PluginSpec, Setting, Tile
-from bdh_sdk.plugins import INT
+from bdh_sdk.plugins import INT, MULTI
 
 spec = PluginSpec(
     id="sonos_control",
@@ -18,6 +18,10 @@ spec = PluginSpec(
         ),
     ),
     settings=(
+        Setting("speakers", "Speakers to show", type=MULTI, default=None,
+                choices_from="sonos_control.sonos.speaker_choices",
+                help="Rooms this hub lists and controls. New speakers stay hidden until ticked. "
+                     "Until this is saved, the hub shows the Sonos Amps."),
         Setting("pause_grace", "Keep paused music on the homepage", type=INT, default=5,
                 minimum=0, maximum=60, unit="min",
                 help="How long a paused group stays on the Music tile so it can be resumed."),

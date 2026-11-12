@@ -11,7 +11,9 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import soco
+from bdh_sdk.plugins import as_list
 from bdh_sdk.settings import app_setting
+from bdh_sdk.storage import app_state
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +31,11 @@ DEFAULT_PRESETS = [{'id': 'all', 'label': 'Everywhere', 'icon': 'fa-house', 'roo
 FLOOR_ORDER = ['upper', 'main', 'outside_main', 'lower', 'outside_lower', 'other']
 
 _lock = threading.Lock()
-_zones = {}           # uid -> SoCo
+_found = {}           # uid -> SoCo, every room on the network
+_found_at = 0.0
+_zones = {}           # uid -> SoCo, the rooms this hub controls
 _zones_at = 0.0
+_zones_for = None     # the picked list _zones was filtered with
 _snapshot = None
 _snapshot_at = 0.0
 _night = None
@@ -82,30 +87,78 @@ def _model_filter():
     return None if '*' in models else models
 
 
-def _wanted(zone):
+def picked_speakers():
+    """Room uids ticked on the Settings page, or None if never picked."""
+    picked = app_setting('sonos_control', 'speakers', None, cast=as_list)
+    return None if picked is None else list(picked)
+
+
+def _model(zone):
+    try:
+        return zone.get_speaker_info().get('model_name') or ''
+    except Exception:  # noqa: BLE001 - speaker unreachable
+        return ''
+
+
+def _wanted(zone, picked):
+    if picked is not None:
+        return zone.uid in picked
     models = _model_filter()
     if models is None:
         return True
-    try:
-        model = (zone.get_speaker_info().get('model_name') or '').lower()
-    except Exception:  # noqa: BLE001 - speaker unreachable
-        return False
-    return any(m in model for m in models)
+    model = _model(zone).lower()
+    return bool(model) and any(m in model for m in models)
+
+
+def _discover_all(force=False):
+    """{uid: SoCo} for every room on the network (bonded speakers count once)."""
+    global _found, _found_at
+    with _lock:
+        if not force and _found and time.monotonic() - _found_at < DISCOVERY_TTL:
+            return dict(_found)
+    found = _discover_sonos(timeout=3) or set()
+    with _lock:
+        if found or not _found:
+            _found = {z.uid: z for z in found}
+        _found_at = time.monotonic()
+        return dict(_found)
 
 
 def zones(force=False):
-    """Return {uid: SoCo} for the controllable rooms (amps by default)."""
-    global _zones, _zones_at
+    """Return {uid: SoCo} for the rooms this hub controls.
+
+    Those ticked under "Speakers" on the Settings page; until that is saved,
+    the rooms whose model matches the ``models`` setting (amps by default).
+    """
+    global _zones, _zones_at, _zones_for
+    picked = picked_speakers()
     with _lock:
-        if not force and _zones and time.monotonic() - _zones_at < DISCOVERY_TTL:
+        fresh = _zones and time.monotonic() - _zones_at < DISCOVERY_TTL
+        if not force and fresh and picked == _zones_for:
             return dict(_zones)
-    found = _discover_sonos(timeout=3) or set()
-    found = [z for z in found if _wanted(z)]
+    found = [z for z in _discover_all(force).values() if _wanted(z, picked)]
     with _lock:
-        if found or not _zones:
+        if found or not _zones or picked is not None:
             _zones = {z.uid: z for z in found}
         _zones_at = time.monotonic()
+        _zones_for = picked
         return dict(_zones)
+
+
+def speaker_choices():
+    """Every room on the network for the Settings page, plus ticked ones now offline."""
+    state = app_state('sonos_control')
+    known = state.get('speaker_names') or {}
+    choices = {}
+    for uid, z in _discover_all().items():
+        model = _model(z)
+        choices[uid] = f'{z.player_name} ({model})' if model else z.player_name
+    if any(known.get(u) != n for u, n in choices.items()):
+        state.set('speaker_names', {**known, **choices})
+    for uid in picked_speakers() or ():
+        if uid not in choices:
+            choices[uid] = f'{known.get(uid, uid)} \u2013 offline'
+    return sorted(choices.items(), key=lambda c: c[1].lower())
 
 
 def _meta(name):
@@ -135,6 +188,12 @@ def source_for(uri, track):
     return {'name': 'Sonos', 'icon': 'fa-music', 'brand': False}
 
 
+def _is_input(uri):
+    """True for a soundbar's TV input or line-in: there is nothing to pause."""
+    uri = (uri or '').lower()
+    return uri.startswith('x-sonos-htastream') or uri.startswith('x-rincon-stream')
+
+
 def _room_state(zone):
     try:
         return {'volume': zone.volume, 'muted': zone.mute, 'online': True}
@@ -144,7 +203,7 @@ def _room_state(zone):
 
 def _group_state(coord):
     out = {'state': 'STOPPED', 'title': '', 'artist': '', 'album': '', 'art': '',
-           'source': None, 'volume': None}
+           'source': None, 'volume': None, 'tv': False}
     try:
         out['state'] = coord.get_current_transport_info().get('current_transport_state', 'STOPPED')
         t = coord.get_current_track_info()
@@ -158,6 +217,7 @@ def _group_state(coord):
                    source=source_for(media_uri or uri, t))
         if uri.startswith('x-sonos-htastream'):
             out['title'] = out['title'] or 'TV audio'
+        out['tv'] = _is_input(media_uri or uri)
     except Exception:  # noqa: BLE001
         log.debug('group state failed for %s', coord.player_name, exc_info=True)
     try:
@@ -178,42 +238,45 @@ def _build_snapshot():
     except Exception:  # noqa: BLE001
         pass
 
-    room_futs = {uid: _pool.submit(_room_state, z) for uid, z in zs.items()}
-    coord_of = {}
     try:
         groups = list(any_zone.all_groups)
     except Exception:  # noqa: BLE001
         groups = []
+    # Rooms not picked on the Settings page show up only as greyed-out
+    # members of a group that also has a picked room.
+    coord_of, guests, coord_zone = {}, {}, {}
     for g in groups:
-        for m in g.members:
-            if m.uid in zs:
-                coord_of[m.uid] = g.coordinator.uid
+        members = list(g.members)
+        if not any(m.uid in zs for m in members):
+            continue
+        coord_zone[g.coordinator.uid] = g.coordinator
+        for m in members:
+            coord_of[m.uid] = g.coordinator.uid
+            if m.uid not in zs:
+                guests[m.uid] = m
     for uid in zs:
         coord_of.setdefault(uid, uid)
 
+    every = {**guests, **zs}
+    room_futs = {uid: _pool.submit(_room_state, z) for uid, z in every.items()}
     coords = {}
     for uid, cuid in coord_of.items():
         coords.setdefault(cuid, []).append(uid)
 
     def zone_for(uid):
-        if uid in zs:
-            return zs[uid]
-        for g in groups:
-            if g.coordinator.uid == uid:
-                return g.coordinator
-        return None
+        return every.get(uid) or coord_zone.get(uid)
 
     group_futs = {c: _pool.submit(_group_state, zone_for(c)) for c in coords if zone_for(c)}
 
     rooms = []
-    for uid, z in zs.items():
+    for uid, z in every.items():
         meta = _meta(z.player_name)
         st = room_futs[uid].result()
         rooms.append({'uid': uid, 'name': z.player_name, 'label': meta['label'],
                       'floor': meta['floor'], 'icon': meta['icon'],
-                      'group': coord_of[uid], **st})
+                      'group': coord_of[uid], 'shown': uid in zs, **st})
     order = {f: i for i, f in enumerate(FLOOR_ORDER)}
-    rooms.sort(key=lambda r: (order.get(r['floor'], 99), r['label']))
+    rooms.sort(key=lambda r: (not r['shown'], order.get(r['floor'], 99), r['label']))
     room_rank = {r['uid']: i for i, r in enumerate(rooms)}
 
     out_groups = []
@@ -289,6 +352,17 @@ def _zone(uid):
     return z
 
 
+def _group(group_id):
+    """The group with this id (its coordinator's uid) that has a picked room."""
+    zs = zones()
+    if group_id in zs:
+        return zs[group_id].group
+    for z in zs.values():
+        if z.group.coordinator.uid == group_id:
+            return z.group
+    raise SonosError('Unknown group')
+
+
 def _leave(z):
     """Remove a room from its group without stopping the others."""
     group = z.group
@@ -340,7 +414,7 @@ def set_rooms(room, uids):
     wanted = [u for u in dict.fromkeys(uids or []) if u in zs]
     if not wanted:
         raise SonosError('Pick at least one room')
-    group = _zone(room).group
+    group = _group(room)
     coord = group.coordinator
     current = [m.uid for m in group.members if m.uid in zs]
     kept = [u for u in current if u in wanted]
@@ -395,13 +469,55 @@ def set_group(names):
     return coord.uid
 
 
+def _transport_state(z):
+    try:
+        return z.get_current_transport_info()['current_transport_state']
+    except Exception:  # noqa: BLE001
+        return ''
+
+
+def _split(group, shown):
+    """Give every room in the group its own player.
+
+    If the coordinator is a room that is not picked on the Settings page it
+    would vanish from the hub still playing, so it is paused.
+    """
+    coord = group.coordinator
+    for m in list(group.members):
+        if m.uid != coord.uid:
+            m.unjoin()
+    if coord.uid not in shown and _transport_state(coord) == 'PLAYING':
+        try:
+            coord.pause()
+        except Exception:  # noqa: BLE001
+            log.info('pause failed for %s', coord.player_name, exc_info=True)
+
+
+def ungroup(group_id):
+    _split(_group(group_id), zones())
+
+
 def ungroup_all():
-    for z in zones().values():
-        if len(z.group.members) > 1 and not z.is_coordinator:
-            z.unjoin()
+    zs = zones()
+    seen = set()
+    for z in zs.values():
+        g = z.group
+        if g.coordinator.uid in seen or len(g.members) < 2:
+            continue
+        seen.add(g.coordinator.uid)
+        _split(g, zs)
+
+
+def _on_input(z):
+    try:
+        uri = z.get_current_media_info().get('uri', '') or z.get_current_track_info().get('uri', '')
+    except Exception:  # noqa: BLE001
+        return False
+    return _is_input(uri)
 
 
 def pause_all():
+    """Pause every playing group with a picked room, except TV / line-in."""
     seen = set()
     for z in zones().values():
         c = z.group.coordinator
@@ -409,14 +525,16 @@ def pause_all():
             continue
         seen.add(c.uid)
         try:
-            if c.get_current_transport_info()['current_transport_state'] == 'PLAYING':
+            if _transport_state(c) == 'PLAYING' and not _on_input(c):
                 c.pause()
         except Exception:  # noqa: BLE001
             log.info('pause failed for %s', c.player_name, exc_info=True)
 
 
 def transport(group_id, op):
-    c = _zone(group_id).group.coordinator
+    c = _group(group_id).coordinator
+    if op in ('play', 'pause') and _on_input(c):
+        raise SonosError('This speaker is playing the TV')
     if op == 'play':
         c.play()
     elif op == 'pause':
@@ -430,7 +548,7 @@ def transport(group_id, op):
 
 
 def set_group_volume(group_id, volume):
-    group = _zone(group_id).group
+    group = _group(group_id)
     group.volume = _clamp(volume, _night_cap(list(group.members)))
 
 

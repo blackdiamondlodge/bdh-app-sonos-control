@@ -47,6 +47,11 @@ def _save(state):
     cache.set(STATE_KEY, state, STATE_TTL)
 
 
+def _music(snap):
+    """Groups that can be paused: a soundbar on its TV input is left off the tile."""
+    return [g for g in snap.get('groups', ()) if not g.get('tv')]
+
+
 def _playing(group, state, now):
     expect = state['expect'].get(group['id'])
     if expect and now < expect[1]:
@@ -59,7 +64,7 @@ def _track(snap, now):
     state = _load()
     grace = _grace()
     ids = set()
-    for g in snap.get('groups', ()):
+    for g in _music(snap):
         gid = g['id']
         ids.add(gid)
         if _playing(g, state, now):
@@ -97,7 +102,7 @@ def status():
     state = _track(snap, now)
     labels = {r['uid']: r['label'] for r in snap.get('rooms', ())}
     rows, playing = [], 0
-    for g in snap.get('groups', ()):
+    for g in _music(snap):
         on = g['id'] in state['playing']
         if on or g['id'] in state['paused']:
             rows.append(_row(g, labels, on))

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bdh-app-sonos-control"
-version = "2.4.0"
+version = "2.5.0"
 description = "Black Diamond Hub app: Sonos room grouping, volume and playback control"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "bdh-sdk>=0.11,<1",
+    "bdh-sdk>=0.13,<1",
     "soco",
 ]
 

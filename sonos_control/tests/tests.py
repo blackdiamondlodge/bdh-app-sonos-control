@@ -70,6 +70,14 @@ class FakeGroup:
 HOUSEHOLD = []
 
 
+def reset():
+    sonos._zones.clear()
+    sonos._found.clear()
+    sonos._zones_at = sonos._found_at = 0.0
+    sonos._zones_for = None
+    sonos.invalidate()
+
+
 def household():
     zs = [FakeZone('Dining Room', 'DR'), FakeZone('Top Deck', 'TD'),
           FakeZone('Hot Tub', 'HT'), FakeZone('Office', 'OF', model='Arc Ultra')]
@@ -82,8 +90,7 @@ def household():
 
 class DiscoveryTests(TestCase):
     def tearDown(self):
-        sonos._zones.clear()
-        sonos.invalidate()
+        reset()
 
     @patch('sonos_control.sonos.soco.discover', return_value=set())
     def test_namespaced_interface_wins(self, discover):
@@ -145,9 +152,7 @@ class SnapshotTests(TestCase):
         sonos._zones_at = float('inf')
 
     def tearDown(self):
-        sonos._zones.clear()
-        sonos._zones_at = 0.0
-        sonos.invalidate()
+        reset()
 
     def test_groups_rooms_and_source(self):
         snap = sonos.snapshot(force=True)
@@ -328,6 +333,113 @@ class ViewTests(TestCase):
     def test_speaker_failure_is_reported(self, set_rooms):
         self.assertEqual(self.post({'action': 'set_rooms', 'room': 'HT', 'rooms': ['HT', 'DR']}).status_code, 502)
 
+class SpeakerPickerTests(TestCase):
+    """The "Speakers to show" setting picks rooms by uid instead of by model."""
+
+    def setUp(self):
+        self.zs = household()
+        p = patch('sonos_control.sonos._discover_sonos', side_effect=lambda **kw: set(self.found))
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(reset)
+        self.found = list(self.zs)
+
+    def names(self, **kw):
+        return sorted(z.player_name for z in sonos.zones(**kw).values())
+
+    @override_settings(BDH_SONOS_CONTROL_SPEAKERS=['OF', 'HT'])
+    def test_picked_uids_override_the_model_filter(self):
+        self.assertEqual(self.names(force=True), ['Hot Tub', 'Office'])
+
+    @override_settings(BDH_SONOS_CONTROL_SPEAKERS=[])
+    def test_nothing_picked_shows_nothing(self):
+        self.assertEqual(self.names(force=True), [])
+
+    def test_changing_the_pick_skips_the_cache(self):
+        with override_settings(BDH_SONOS_CONTROL_SPEAKERS=['DR']):
+            self.assertEqual(self.names(), ['Dining Room'])
+        with override_settings(BDH_SONOS_CONTROL_SPEAKERS=['TD']):
+            self.assertEqual(self.names(), ['Top Deck'])
+
+    def test_choices_list_every_room_and_offline_picks(self):
+        self.assertEqual([label for _, label in sonos.speaker_choices()],
+                         ['Dining Room (Sonos Amp)', 'Hot Tub (Sonos Amp)',
+                          'Office (Arc Ultra)', 'Top Deck (Sonos Amp)'])
+        self.found = self.zs[:3]
+        sonos._found_at = 0.0
+        with override_settings(BDH_SONOS_CONTROL_SPEAKERS=['OF', 'GONE']):
+            choices = dict(sonos.speaker_choices())
+        self.assertEqual(choices['OF'], 'Office (Arc Ultra) \u2013 offline')
+        self.assertEqual(choices['GONE'], 'GONE \u2013 offline')
+
+
+class PickedGroupTests(TestCase):
+    """Groups that mix picked and unpicked rooms."""
+
+    def setUp(self):
+        self.zs = household()
+        for z in self.zs:
+            z.pause = MagicMock()
+            z.play = MagicMock()
+        self.addCleanup(reset)
+
+    def show(self, *uids):
+        sonos._zones.clear()
+        sonos._zones.update({z.uid: z for z in self.zs if z.uid in uids})
+        sonos._zones_at = float('inf')
+
+    def test_unpicked_members_are_greyed_guests(self):
+        self.show('TD')
+        snap = sonos.snapshot(force=True)
+        self.assertEqual([g['id'] for g in snap['groups']], ['DR'])
+        shown = {r['uid']: r['shown'] for r in snap['rooms']}
+        self.assertEqual(shown, {'TD': True, 'DR': False})
+
+    def test_ungroup_pauses_an_unpicked_coordinator(self):
+        self.show('TD')
+        self.zs[0].transport = 'PLAYING'
+        sonos.ungroup('DR')
+        self.zs[1].unjoin.assert_called_once()
+        self.zs[0].pause.assert_called_once()
+
+    def test_ungroup_keeps_a_picked_coordinator_playing(self):
+        self.show('DR', 'TD')
+        self.zs[0].transport = 'PLAYING'
+        sonos.ungroup('DR')
+        self.assertEqual(self.zs[1].group.members, [self.zs[1]])
+        self.zs[0].pause.assert_not_called()
+
+    def test_ungroup_all_leaves_unpicked_groups_alone(self):
+        self.show('HT')
+        sonos.ungroup_all()
+        self.zs[1].unjoin.assert_not_called()
+        self.assertEqual(len(self.zs[0].group.members), 2)
+
+    def test_pause_all_skips_the_tv(self):
+        self.show('DR', 'TD', 'HT')
+        self.zs[0].transport = self.zs[2].transport = 'PLAYING'
+        self.zs[0].get_current_media_info = lambda: {'uri': 'x-sonos-htastream:RINCON_DR:spdif'}
+        sonos.pause_all()
+        self.zs[0].pause.assert_not_called()
+        self.zs[2].pause.assert_called_once()
+
+    def test_play_pause_refused_on_tv(self):
+        self.show('DR', 'TD')
+        self.zs[0].get_current_media_info = lambda: {'uri': 'x-sonos-htastream:RINCON_DR:spdif'}
+        with self.assertRaises(sonos.SonosError):
+            sonos.transport('DR', 'pause')
+        self.assertTrue(sonos.snapshot(force=True)['groups'][0]['tv'])
+
+    @patch('sonos_control.views.time.sleep')
+    @patch('sonos_control.views.sonos.snapshot', return_value={'rooms': [], 'groups': [], 'presets': []})
+    @patch('sonos_control.views.sonos.ungroup')
+    def test_ungroup_action(self, ungroup, snap, sleep):
+        res = self.client.post(reverse('sonos_action'), json.dumps({'action': 'ungroup', 'group': 'DR'}),
+                               content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        ungroup.assert_called_once_with('DR')
+
+
 def snap(*states):
     """A snapshot with groups DR (Dining Room + Top Deck) and HT (Hot Tub)."""
     rooms = [{'uid': 'DR', 'label': 'Dining'}, {'uid': 'TD', 'label': 'Top Deck'},
@@ -415,3 +527,11 @@ class HomepageTileTests(TestCase):
         from sonos_control import homepage
         with patch('sonos_control.homepage.sonos.snapshot', side_effect=OSError('down')):
             self.assertIsNone(homepage.status())
+
+    def test_tv_groups_are_left_off(self):
+        from sonos_control import homepage
+        data = snap('PLAYING', 'PLAYING')
+        data['groups'][0]['tv'] = True
+        with patch('sonos_control.homepage.sonos.snapshot', return_value=data):
+            s = homepage.status()
+        self.assertEqual([r.id for r in s.rows], ['HT'])

@@ -2,7 +2,7 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from sonos_control import sonos
@@ -103,6 +103,33 @@ class DiscoveryTests(TestCase):
         with patch('sonos_control.sonos._discover_sonos', return_value=set(household())):
             names = sorted(z.player_name for z in sonos.zones(force=True).values())
         self.assertEqual(names, ['Dining Room', 'Hot Tub', 'Top Deck'])
+
+    @override_settings(BDH_SONOS_CONTROL_MODELS='*')
+    def test_star_controls_every_model(self):
+        zs = household()
+        zs[3].get_speaker_info = MagicMock(side_effect=OSError('unreachable'))
+        with patch('sonos_control.sonos._discover_sonos', return_value=set(zs)):
+            names = sorted(z.player_name for z in sonos.zones(force=True).values())
+        self.assertEqual(names, ['Dining Room', 'Hot Tub', 'Office', 'Top Deck'])
+
+
+class SiteConfigTests(TestCase):
+    def test_default_preset_is_everywhere(self):
+        self.assertEqual([p['rooms'] for p in sonos.presets()], ['*'])
+
+    @override_settings(BDH_SONOS_CONTROL_ROOMS={'Kitchen': {'label': 'Kitchen', 'icon': 'fa-utensils'}})
+    def test_rooms_from_django_setting(self):
+        self.assertEqual(sonos._meta('Kitchen'), {'label': 'Kitchen', 'floor': 'other', 'icon': 'fa-utensils'})
+        self.assertEqual(sonos._meta('Den'), {'label': 'Den', 'floor': 'other', 'icon': 'fa-volume-high'})
+
+    def test_presets_from_env_json(self):
+        env = {'BDH_SONOS_CONTROL_PRESETS': json.dumps([{'id': 'kd', 'label': 'K + D', 'rooms': ['Kitchen', 'Deck']}])}
+        with patch.dict(os.environ, env):
+            self.assertEqual(sonos.presets()[0]['rooms'], ['Kitchen', 'Deck'])
+
+    def test_bad_env_json_falls_back(self):
+        with patch.dict(os.environ, {'BDH_SONOS_CONTROL_PRESETS': '[oops'}):
+            self.assertEqual(sonos.presets(), sonos.DEFAULT_PRESETS)
 
 
 class SnapshotTests(TestCase):
@@ -269,6 +296,8 @@ class ViewTests(TestCase):
     def test_unknown_action_rejected(self):
         self.assertEqual(self.post({'action': 'format_disk'}).status_code, 400)
 
+    @override_settings(BDH_SONOS_CONTROL_PRESETS=[
+        {'id': 'dining_deck', 'label': 'Dining + Top Deck', 'rooms': ['Dining Room', 'Top Deck']}])
     @patch('sonos_control.views.time.sleep')
     @patch('sonos_control.views.sonos.snapshot', return_value={'rooms': [], 'groups': [], 'presets': []})
     @patch('sonos_control.views.sonos.set_group', return_value='DR')

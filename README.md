@@ -1,13 +1,14 @@
 # bdh-app-sonos-control
 
-Black Diamond Hub app for the lodge's Sonos amps. Every room or group is
+Black Diamond Hub app for a site's Sonos speakers. Every room or group is
 a player card (playing ones first, idle ones as compact rows) with
 play/pause/skip and volume; group cards expand to per-room volume and mute.
-Each card's Rooms button opens a picture of the lodge where you tick the
+Each card's Rooms button opens a picture of the house (or a plain grid of
+rooms when no floors are configured) where you tick the
 rooms that play together (a room already in another group can be moved
-after a confirmation). Quick groups (Dining + Top Deck, Whole Lodge),
+after a confirmation). Quick groups (configured per site),
 Ungroup all and Pause all sit on top. Guests play music from their own
-phones (Spotify Connect, AirPlay and so on); the soundbars are left to the TVs.
+phones (Spotify Connect, AirPlay and so on).
 Moved out of
 [BlackDiamondHub](https://github.com/blackdiamondlodge/BlackDiamondHub) and
 installed into the hub through the `blackdiamondhub.plugins` entry point
@@ -17,20 +18,27 @@ Page: `/sonos_control/`. The page polls `state/` every 2 seconds and
 sends changes to `action/`. Every screen shares one cached snapshot, so
 the speakers see the same traffic however many screens are open.
 
-Settings (environment):
+Settings (each reads the Settings page, then the environment variable,
+then the Django setting of the same name; the hub fills the Django settings
+from `[apps.sonos_control]` in its `sites/<site>/site.toml`):
 
 - `BDH_SONOS_CONTROL_INTERFACE` (legacy `SONOS_INTERFACE`): IP of the
   interface on the Sonos network, for Docker with host networking.
 - `BDH_SONOS_CONTROL_MODELS`: comma-separated model names to control
-  (default `Amp`).
+  (default `Amp`); `*` controls every Sonos.
+- `BDH_SONOS_CONTROL_ROOMS`: `{sonos room name: {label, floor, icon}}`
+  (JSON in the environment). `floor` is `upper` / `main` / `lower` (inside the
+  house picture) or `outside_main` / `outside_lower`. If no room has a floor,
+  the room picker is a plain grid. Unlisted rooms use their Sonos name.
+- `BDH_SONOS_CONTROL_PRESETS`: quick groups,
+  `[{id, label, icon, rooms: [room names] or "*"}]` (JSON in the
+  environment). Default: one "Everywhere" button.
 - `BDH_SONOS_CONTROL_NIGHT_URL`: status endpoint of the
   [appdaemon-sonos-night](https://github.com/sslivins/appdaemon-sonos-night)
   app, e.g. `http://192.168.10.217:5050/api/appdaemon/sonos_night`. During
   quiet hours the page shows the limit and caps the outdoor sliders. The limit
   itself is enforced by that app, so phones can't get around it. Unset means
   no night limit is shown.
-
-Room names, floors and presets are in `sonos_control/sonos.py`.
 
 ## Development
 

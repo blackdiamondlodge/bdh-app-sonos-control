@@ -19,22 +19,12 @@ DISCOVERY_TTL = 60
 SNAPSHOT_TTL = 1.5
 NIGHT_TTL = 30
 
-# Where each room sits on the lodge diagram. Keys are Sonos room names.
-#   floor: upper / main / lower (inside) or outside_main / outside_lower
-LAYOUT = {
-    'Master Bedroom En-suite': {'label': 'Master En-suite', 'floor': 'upper', 'icon': 'fa-bath'},
-    'Dining Room': {'label': 'Dining Room', 'floor': 'main', 'icon': 'fa-utensils'},
-    'Basement Master En-suite': {'label': 'Basement En-suite', 'floor': 'lower', 'icon': 'fa-bath'},
-    'Top Deck': {'label': 'Top Deck', 'floor': 'outside_main', 'icon': 'fa-tree'},
-    'Lower Deck': {'label': 'Lower Deck', 'floor': 'outside_lower', 'icon': 'fa-chair'},
-    'Hot Tub': {'label': 'Hot Tub', 'floor': 'outside_lower', 'icon': 'fa-hot-tub-person'},
-}
-
-PRESETS = [
-    {'id': 'dining_deck', 'label': 'Dining + Top Deck', 'icon': 'fa-utensils',
-     'rooms': ['Dining Room', 'Top Deck']},
-    {'id': 'whole', 'label': 'Whole Lodge', 'icon': 'fa-house', 'rooms': '*'},
-]
+# Rooms and quick groups come from the site's settings (see README):
+#   rooms:   {sonos room name: {label, floor, icon}}; floor is upper / main / lower
+#            (inside the house diagram) or outside_main / outside_lower. With no
+#            floors set, the room picker shows a plain grid instead.
+#   presets: [{id, label, icon, rooms: [room names] or "*"}]
+DEFAULT_PRESETS = [{'id': 'all', 'label': 'Everywhere', 'icon': 'fa-house', 'rooms': '*'}]
 
 FLOOR_ORDER = ['upper', 'main', 'outside_main', 'lower', 'outside_lower', 'other']
 
@@ -65,17 +55,42 @@ def _discover_sonos(**kwargs):
     return soco.discover(**kwargs)
 
 
+def _structured(key, default):
+    """A dict/list setting; environment values are JSON."""
+    value = app_setting('sonos_control', key, default)
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            log.warning('sonos_control %s is not valid JSON; using the default', key)
+            return default
+    return value
+
+
+def room_layout():
+    return _structured('rooms', {})
+
+
+def presets():
+    return _structured('presets', DEFAULT_PRESETS)
+
+
 def _model_filter():
+    """Lower-cased model-name fragments to control, or None for every model ("*")."""
     raw = app_setting('sonos_control', 'models', 'Amp')
-    return [m.strip().lower() for m in str(raw).split(',') if m.strip()]
+    models = [m.strip().lower() for m in str(raw).split(',') if m.strip()]
+    return None if '*' in models else models
 
 
 def _wanted(zone):
+    models = _model_filter()
+    if models is None:
+        return True
     try:
         model = (zone.get_speaker_info().get('model_name') or '').lower()
     except Exception:  # noqa: BLE001 - speaker unreachable
         return False
-    return any(m in model for m in _model_filter())
+    return any(m in model for m in models)
 
 
 def zones(force=False):
@@ -94,10 +109,9 @@ def zones(force=False):
 
 
 def _meta(name):
-    m = LAYOUT.get(name)
-    if m:
-        return dict(m)
-    return {'label': name, 'floor': 'other', 'icon': 'fa-volume-high'}
+    m = room_layout().get(name) or {}
+    return {'label': m.get('label') or name, 'floor': m.get('floor') or 'other',
+            'icon': m.get('icon') or 'fa-volume-high'}
 
 
 def source_for(uri, track):
@@ -156,7 +170,7 @@ def _group_state(coord):
 def _build_snapshot():
     zs = zones()
     if not zs:
-        return {'rooms': [], 'groups': [], 'presets': PRESETS, 'ts': time.time()}
+        return {'rooms': [], 'groups': [], 'presets': presets(), 'ts': time.time()}
 
     any_zone = next(iter(zs.values()))
     try:
@@ -211,7 +225,7 @@ def _build_snapshot():
             gs['volume'] = round(sum(vols) / len(vols)) if vols else 0
         out_groups.append({'id': cuid, 'members': members, **gs})
     out_groups.sort(key=lambda g: room_rank[g['members'][0]])
-    return {'rooms': rooms, 'groups': out_groups, 'presets': PRESETS,
+    return {'rooms': rooms, 'groups': out_groups, 'presets': presets(),
             'night': night_status(), 'ts': time.time()}
 
 

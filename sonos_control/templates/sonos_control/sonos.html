@@ -223,6 +223,11 @@
     .f3 { top: 68%; height: 30%; }
     .deck { position: absolute; border-top: 3px solid rgba(255, 255, 255, .25); }
     .outside-label { position: absolute; right: 0; top: 4%; font-size: 11px; font-weight: 700; letter-spacing: .16em; color: rgba(255, 255, 255, .35); }
+    /* No floor plan configured: plain grid of room cards. */
+    .stage.flat { height: auto; }
+    .stage.flat .house, .stage.flat .outside-label { display: none; }
+    .stage.flat #pk-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; padding: 10px 4px; }
+    .stage.flat .rm { position: relative; min-height: 120px; }
 
     .rm {
         position: absolute;
@@ -319,7 +324,7 @@
             <button class="btn" data-pk="cancel">Cancel</button>
             <button class="btn pri" id="pk-done" data-pk="done">Done</button>
         </div>
-        <div class="stage">
+        <div class="stage" id="pk-stage">
             <div class="house">
                 <div class="roof"></div>
                 <div class="floor f1"><span class="fl">Upper</span></div>
@@ -538,14 +543,17 @@
 
     function renderPicker() {
         if (!pk || !state) return;
-        const pos = layoutRooms();
+        const flat = !state.rooms.some(r => r.floor && r.floor !== 'other');
+        document.getElementById('pk-stage').classList.toggle('flat', flat);
+        const pos = flat ? {} : layoutRooms();
         let html = '';
-        if (state.rooms.some(r => r.floor === 'outside_main')) html += '<div class="deck" style="left:58%;top:62%;width:38%"></div>';
-        if (state.rooms.some(r => r.floor === 'outside_lower' || r.floor === 'other')) html += '<div class="deck" style="left:58%;top:89%;width:38%"></div>';
+        if (!flat && state.rooms.some(r => r.floor === 'outside_main')) html += '<div class="deck" style="left:58%;top:62%;width:38%"></div>';
+        if (!flat && state.rooms.some(r => r.floor === 'outside_lower' || r.floor === 'other')) html += '<div class="deck" style="left:58%;top:89%;width:38%"></div>';
         state.rooms.forEach(r => {
             const p = pos[r.uid];
             const info = pickInfo(r);
-            html += `<div class="rm ${info.cls}" data-room="${esc(r.uid)}" style="left:${p.left}%;top:${p.top}%;width:${p.w}%;height:${p.h}%">` +
+            const style = p ? ` style="left:${p.left}%;top:${p.top}%;width:${p.w}%;height:${p.h}%"` : '';
+            html += `<div class="rm ${info.cls}" data-room="${esc(r.uid)}"${style}>` +
                 `<span class="bd">${info.icon ? `<i class="fas ${info.icon}"></i>` : ''}</span>` +
                 `<i class="fas ${esc(r.icon)} ic"></i>${esc(r.label)}<small>${esc(info.sub)}</small></div>`;
         });

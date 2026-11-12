@@ -40,7 +40,7 @@ ACTIONS = {
 
 
 def _preset_rooms(preset_id):
-    for p in sonos.PRESETS:
+    for p in sonos.presets():
         if p['id'] == preset_id:
             return p['rooms']
     raise sonos.SonosError('Unknown preset')
